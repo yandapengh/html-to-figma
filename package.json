@@ -3,13 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "tsc",
+    "build": "npx esbuild code.ts --bundle --outfile=code.js --format=iife --target=es2017 --external:figma",
+    "typecheck": "tsc --noEmit",
     "watch": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
     "@figma/plugin-typings": "^1.100.0",
+    "esbuild": "^0.24.0",
     "jsdom": "^25.0.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
