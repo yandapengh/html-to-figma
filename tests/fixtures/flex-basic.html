@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    .container { display: flex; flex-direction: column; gap: 16px; padding: 24px; max-width: 400px; }
+    .card { display: flex; flex-direction: row; gap: 12px; padding: 16px; background: #f0f0f0; border-radius: 8px; }
+    .avatar { width: 48px; height: 48px; background: #18A0FB; border-radius: 24px; flex-shrink: 0; }
+    .content { display: flex; flex-direction: column; gap: 4px; }
+    .title { font-size: 16px; font-weight: 700; color: #333; }
+    .desc { font-size: 14px; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="avatar"></div>
+      <div class="content">
+        <span class="title">Card Title</span>
+        <span class="desc">This is a description for the card</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="avatar"></div>
+      <div class="content">
+        <span class="title">Another Card</span>
+        <span class="desc">With different content here</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
