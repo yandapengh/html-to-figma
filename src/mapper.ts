@@ -56,7 +56,7 @@ export function mapSizingMode(style: ExtractedStyle): {
   };
 }
 
-export function mapFills(textColor: string, bgColor: string, bgImage: string): FigmaFill[] {
+export function mapFills(bgColor: string): FigmaFill[] {
   const fills: FigmaFill[] = [];
   const parsed = parseColor(bgColor);
   if (parsed) {
@@ -71,7 +71,7 @@ export function mapStrokes(style: ExtractedStyle): FigmaStroke[] {
   const color = parseColor(style.borderTopColor) || parseColor(style.borderRightColor) ||
     parseColor(style.borderBottomColor) || parseColor(style.borderLeftColor);
   if (!color) return [];
-  return [{ type: 'SOLID', color }];
+  return [{ type: 'SOLID', color, weight: w }];
 }
 
 export function mapCornerRadius(style: ExtractedStyle): number {
@@ -91,6 +91,15 @@ export function mapDimensions(style: ExtractedStyle): { width?: number; height?:
   return dim;
 }
 
+function fontWeightToStyle(weight: number, fontStyle: string): string {
+  if (fontStyle === 'italic') return 'Italic';
+  if (weight >= 800) return 'Extra Bold';
+  if (weight >= 700) return 'Bold';
+  if (weight >= 600) return 'Semi Bold';
+  if (weight >= 500) return 'Medium';
+  return 'Regular';
+}
+
 export function mapTextStyle(style: ExtractedStyle): {
   fontSize?: number;
   fontName?: { family: string; style: string };
@@ -105,8 +114,9 @@ export function mapTextStyle(style: ExtractedStyle): {
     fontSize: style.fontSize,
     fontName: {
       family: style.fontFamily,
-      style: style.fontWeight >= 700 ? 'Bold' : style.fontStyle === 'italic' ? 'Italic' : 'Regular',
+      style: fontWeightToStyle(style.fontWeight, style.fontStyle),
     },
+    // getComputedStyle always returns line-height in pixels; unitless values are already resolved
     lineHeight: { value: style.lineHeight, unit: 'PIXELS' },
     letterSpacing: { value: style.letterSpacing, unit: 'PIXELS' },
     textAlignHorizontal: style.textAlign === 'center' ? 'CENTER' : style.textAlign === 'right' ? 'RIGHT' : 'LEFT',
@@ -150,7 +160,7 @@ export function mapToFigmaSpec(node: ExtractedNode): FigmaNodeSpec {
   if (dims.height) spec.height = dims.height;
 
   if (type !== 'TEXT') {
-    spec.fills = mapFills(style.color, style.backgroundColor, style.backgroundImage);
+    spec.fills = mapFills(style.backgroundColor);
   }
 
   if (type === 'FRAME' || type === 'RECTANGLE') {

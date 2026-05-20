@@ -99,6 +99,7 @@ export interface FigmaFill {
 export interface FigmaStroke {
   type: 'SOLID';
   color: { r: number; g: number; b: number; a: number };
+  weight?: number;
 }
 
 export interface FigmaEffect {

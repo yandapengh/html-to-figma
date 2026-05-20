@@ -103,14 +103,14 @@ describe('mapLayoutMode', () => {
 
 describe('mapFills', () => {
   it('maps background color to solid fill', () => {
-    const fills = mapFills('#000000', '#ff0000', 'none');
+    const fills = mapFills('#ff0000');
     expect(fills).toHaveLength(1);
     expect(fills[0].type).toBe('SOLID');
     expect(fills[0].color).toEqual({ r: 1, g: 0, b: 0, a: 1 });
   });
 
   it('returns empty for transparent background', () => {
-    expect(mapFills('#000000', 'transparent', 'none')).toEqual([]);
+    expect(mapFills('transparent')).toEqual([]);
   });
 });
 
