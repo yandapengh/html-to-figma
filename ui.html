@@ -1,0 +1,285 @@
+<!-- ui.html - Plugin user interface -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Inter, -apple-system, sans-serif; font-size: 12px; color: #333; padding: 16px; }
+    h2 { font-size: 14px; margin-bottom: 4px; }
+    .subtitle { font-size: 11px; color: #999; margin-bottom: 16px; }
+    .drop-zone {
+      border: 2px dashed #ccc; border-radius: 8px; padding: 24px; text-align: center;
+      cursor: pointer; transition: border-color 0.2s; margin-bottom: 16px;
+    }
+    .drop-zone:hover, .drop-zone.dragover { border-color: #18A0FB; background: #f0f8ff; }
+    .drop-zone input { display: none; }
+    .drop-zone p { color: #999; font-size: 12px; }
+    .file-list { max-height: 200px; overflow-y: auto; margin-bottom: 16px; }
+    .file-item {
+      display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 4px;
+      background: #f5f5f5; margin-bottom: 4px;
+    }
+    .file-item .name { flex: 1; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-item .remove { cursor: pointer; color: #999; font-size: 16px; }
+    .file-item .status { font-size: 10px; }
+    .file-item .status.ready { color: #18A0FB; }
+    .file-item .status.error { color: #F24822; }
+    .preview-area {
+      border: 1px solid #e5e5e5; border-radius: 4px; overflow: hidden; margin-bottom: 16px;
+      min-height: 100px; background: #fafafa; display: flex; align-items: center; justify-content: center;
+    }
+    .preview-area iframe { border: none; transform: scale(0.35); transform-origin: top left; pointer-events: none; }
+    .preview-area p { color: #ccc; font-size: 12px; }
+    .btn {
+      width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 12px;
+      font-weight: 600; cursor: pointer; margin-bottom: 8px;
+    }
+    .btn-primary { background: #18A0FB; color: #fff; }
+    .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+    .btn-secondary { background: #f0f0f0; color: #333; }
+    .progress { margin-bottom: 8px; font-size: 11px; color: #999; text-align: center; }
+  </style>
+</head>
+<body>
+  <h2>AI HTML to Figma</h2>
+  <p class="subtitle">Convert AI-generated HTML to Figma Auto Layout frames</p>
+
+  <div class="drop-zone" id="dropZone">
+    <p>Click or drag .html files here</p>
+    <input type="file" id="fileInput" accept=".html" multiple>
+  </div>
+
+  <div class="file-list" id="fileList"></div>
+
+  <div class="preview-area" id="previewArea">
+    <p>Select a file to preview</p>
+  </div>
+
+  <div class="progress" id="progress"></div>
+
+  <button class="btn btn-primary" id="generateBtn" disabled>Generate in Figma</button>
+  <button class="btn btn-secondary" id="closeBtn">Close</button>
+
+  <script>
+  // --- HTML Extractor (inlined from src/extractor.ts) ---
+  (function () {
+    var ANIMATION_OVERRIDE = '*, *::before, *::after{animation:none!important;animation-duration:0s!important;transition:none!important;transition-duration:0s!important;transform:none!important}';
+
+    function stripAnimations(doc) {
+      var style = doc.createElement('style');
+      style.textContent = ANIMATION_OVERRIDE;
+      doc.head.appendChild(style);
+      doc.querySelectorAll('script').forEach(function(el) { el.remove(); });
+      doc.querySelectorAll('canvas, video, audio, iframe').forEach(function(el) { el.remove(); });
+      doc.querySelectorAll('[aria-hidden="true"]').forEach(function(el) { el.remove(); });
+    }
+
+    function extractStyle(el) {
+      var cs = window.getComputedStyle(el);
+      var px = function(prop) {
+        var v = cs.getPropertyValue(prop);
+        var m = v.match(/^([\d.]+)px$/);
+        return m ? parseFloat(m[1]) : 0;
+      };
+
+      var paddingTop = px('padding-top');
+      var paddingRight = px('padding-right');
+      var paddingBottom = px('padding-bottom');
+      var paddingLeft = px('padding-left');
+      var marginTop = px('margin-top');
+      var marginRight = px('margin-right');
+      var marginBottom = px('margin-bottom');
+      var marginLeft = px('margin-left');
+      var borderTopWidth = px('border-top-width');
+      var borderRightWidth = px('border-right-width');
+      var borderBottomWidth = px('border-bottom-width');
+      var borderLeftWidth = px('border-left-width');
+
+      var width = cs.getPropertyValue('width');
+      var height = cs.getPropertyValue('height');
+      var widthPx = width.endsWith('px') ? parseFloat(width) : el.getBoundingClientRect().width;
+      var heightPx = height.endsWith('px') ? parseFloat(height) : el.getBoundingClientRect().height;
+      var gapPx = px('column-gap') || px('gap') || px('row-gap');
+
+      return {
+        display: cs.getPropertyValue('display'),
+        position: cs.getPropertyValue('position'),
+        flexDirection: cs.getPropertyValue('flex-direction'),
+        justifyContent: cs.getPropertyValue('justify-content'),
+        alignItems: cs.getPropertyValue('align-items'),
+        flexWrap: cs.getPropertyValue('flex-wrap'),
+        gap: gapPx, width: Math.round(widthPx), height: Math.round(heightPx),
+        paddingTop: paddingTop, paddingRight: paddingRight, paddingBottom: paddingBottom, paddingLeft: paddingLeft,
+        marginTop: marginTop, marginRight: marginRight, marginBottom: marginBottom, marginLeft: marginLeft,
+        color: cs.getPropertyValue('color'),
+        backgroundColor: cs.getPropertyValue('background-color'),
+        backgroundImage: cs.getPropertyValue('background-image'),
+        fontSize: px('font-size'),
+        fontFamily: cs.getPropertyValue('font-family').split(',')[0].replace(/['"]/g, '').trim(),
+        fontWeight: parseFloat(cs.getPropertyValue('font-weight')) || 400,
+        fontStyle: cs.getPropertyValue('font-style'),
+        lineHeight: parseFloat(cs.getPropertyValue('line-height')) || px('font-size') * 1.2,
+        letterSpacing: px('letter-spacing'),
+        textAlign: cs.getPropertyValue('text-align'),
+        textDecoration: cs.getPropertyValue('text-decoration'),
+        borderTopWidth: borderTopWidth, borderRightWidth: borderRightWidth,
+        borderBottomWidth: borderBottomWidth, borderLeftWidth: borderLeftWidth,
+        borderTopColor: cs.getPropertyValue('border-top-color'),
+        borderRightColor: cs.getPropertyValue('border-right-color'),
+        borderBottomColor: cs.getPropertyValue('border-bottom-color'),
+        borderLeftColor: cs.getPropertyValue('border-left-color'),
+        borderRadius: px('border-radius'),
+        borderTopLeftRadius: px('border-top-left-radius'),
+        borderTopRightRadius: px('border-top-right-radius'),
+        borderBottomRightRadius: px('border-bottom-right-radius'),
+        borderBottomLeftRadius: px('border-bottom-left-radius'),
+        boxShadow: cs.getPropertyValue('box-shadow'),
+        opacity: parseFloat(cs.getPropertyValue('opacity')) || 1,
+        overflow: cs.getPropertyValue('overflow'),
+        boxSizing: cs.getPropertyValue('box-sizing'),
+        tagName: el.tagName.toLowerCase()
+      };
+    }
+
+    function extractNode(el) {
+      var tag = el.tagName.toLowerCase();
+      var children = [];
+      var text = '';
+      for (var i = 0; i < el.childNodes.length; i++) {
+        var child = el.childNodes[i];
+        if (child.nodeType === Node.TEXT_NODE) {
+          var content = child.textContent ? child.textContent.trim() : '';
+          if (content) text += content;
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          var childEl = child;
+          var display = window.getComputedStyle(childEl).getPropertyValue('display');
+          if (display === 'none') continue;
+          children.push(extractNode(childEl));
+        }
+      }
+      return { tag: tag, children: children, text: text, style: extractStyle(el) };
+    }
+
+    window.HtmlExtractor = {
+      extractFromHtml: function(html) {
+        return new Promise(function(resolve, reject) {
+          var iframe = document.createElement('iframe');
+          iframe.style.cssText = 'position:absolute;left:-9999px;width:1440px;height:900px;border:none;';
+          document.body.appendChild(iframe);
+          iframe.onload = function() {
+            try {
+              var doc = iframe.contentDocument || iframe.contentWindow.document;
+              stripAnimations(doc);
+              requestAnimationFrame(function() {
+                try {
+                  var body = doc.body || doc.documentElement;
+                  var root = extractNode(body);
+                  document.body.removeChild(iframe);
+                  resolve(root);
+                } catch(e) { document.body.removeChild(iframe); reject(e); }
+              });
+            } catch(e) { document.body.removeChild(iframe); reject(e); }
+          };
+          iframe.onerror = function() { document.body.removeChild(iframe); reject(new Error('Failed to load HTML')); };
+          iframe.srcdoc = html;
+        });
+      }
+    };
+  })();
+
+  // --- UI Logic ---
+  var files = [];
+  var extractedNodes = {};
+  var selectedIndex = -1;
+
+  var dropZone = document.getElementById('dropZone');
+  var fileInput = document.getElementById('fileInput');
+  var fileList = document.getElementById('fileList');
+  var previewArea = document.getElementById('previewArea');
+  var progressEl = document.getElementById('progress');
+  var generateBtn = document.getElementById('generateBtn');
+  var closeBtn = document.getElementById('closeBtn');
+
+  dropZone.addEventListener('click', function() { fileInput.click(); });
+  dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('dragover'); });
+  dropZone.addEventListener('drop', function(e) {
+    e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', function() { handleFiles(fileInput.files); });
+
+  function handleFiles(fileList) {
+    for (var i = 0; i < fileList.length; i++) {
+      var file = fileList[i];
+      if (!file.name.endsWith('.html')) continue;
+      files.push(file);
+      addFileToList(file);
+      extractFile(file);
+    }
+    fileInput.value = '';
+  }
+
+  function addFileToList(file) {
+    var idx = files.length - 1;
+    var item = document.createElement('div');
+    item.className = 'file-item';
+    item.id = 'file-' + idx;
+    item.innerHTML = '<span class="name">' + file.name + '</span><span class="status" id="status-' + idx + '">Extracting...</span><span class="remove" id="remove-' + idx + '">×</span>';
+    item.addEventListener('click', function() { selectFile(idx); });
+    fileList.appendChild(item);
+    document.getElementById('remove-' + idx).addEventListener('click', function(e) { e.stopPropagation(); removeFile(idx); });
+  }
+
+  function extractFile(file) {
+    var idx = files.indexOf(file);
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      window.HtmlExtractor.extractFromHtml(e.target.result).then(function(node) {
+        extractedNodes[idx] = node;
+        var statusEl = document.getElementById('status-' + idx);
+        if (statusEl) { statusEl.textContent = 'Ready'; statusEl.className = 'status ready'; }
+      }).catch(function() {
+        var statusEl = document.getElementById('status-' + idx);
+        if (statusEl) { statusEl.textContent = 'Failed'; statusEl.className = 'status error'; }
+      });
+    };
+    reader.readAsText(file);
+  }
+
+  function selectFile(idx) {
+    selectedIndex = idx;
+    document.querySelectorAll('.file-item').forEach(function(el) { el.style.background = '#f5f5f5'; });
+    var el = document.getElementById('file-' + idx);
+    if (el) el.style.background = '#e0f0ff';
+    generateBtn.disabled = false;
+    if (extractedNodes[idx]) {
+      var file = files[idx];
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        previewArea.innerHTML = '<iframe width="1440" height="900" srcdoc="' +
+          e.target.result.replace(/"/g, '&quot;').replace(/<script/g, '<!--').replace(/<\/script>/g, '-->') + '"></iframe>';
+      };
+      reader.readAsText(file);
+    }
+  }
+
+  function removeFile(idx) {
+    delete files[idx]; delete extractedNodes[idx];
+    var el = document.getElementById('file-' + idx);
+    if (el) el.remove();
+    if (selectedIndex === idx) { selectedIndex = -1; generateBtn.disabled = true; previewArea.innerHTML = '<p>Select a file to preview</p>'; }
+  }
+
+  generateBtn.addEventListener('click', function() {
+    if (selectedIndex < 0 || !extractedNodes[selectedIndex]) return;
+    progressEl.textContent = 'Generating...';
+    parent.postMessage({ pluginMessage: { type: 'generate-from-node', node: extractedNodes[selectedIndex] } }, '*');
+  });
+
+  closeBtn.addEventListener('click', function() {
+    parent.postMessage({ pluginMessage: { type: 'close' } }, '*');
+  });
+  </script>
+</body>
+</html>
