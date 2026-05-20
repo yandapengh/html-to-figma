@@ -20,6 +20,7 @@ export function mapLayoutMode(style: ExtractedStyle): FigmaNodeSpec['layoutMode'
     return 'HORIZONTAL';
   }
   if (style.display === 'grid') return 'HORIZONTAL';
+  if (style.display === 'block' || style.display === 'inline-block') return 'VERTICAL';
   return undefined;
 }
 

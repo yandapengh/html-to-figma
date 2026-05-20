@@ -96,8 +96,8 @@ describe('mapLayoutMode', () => {
     expect(mapLayoutMode(makeStyle({ display: 'flex', flexDirection: 'column' }))).toBe('VERTICAL');
   });
 
-  it('returns undefined for block display', () => {
-    expect(mapLayoutMode(makeStyle({ display: 'block' }))).toBeUndefined();
+  it('returns VERTICAL for block display', () => {
+    expect(mapLayoutMode(makeStyle({ display: 'block' }))).toBe('VERTICAL');
   });
 });
 
