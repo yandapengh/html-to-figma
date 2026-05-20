@@ -1,7 +1,10 @@
 import { RgbColor, FigmaEffect } from './types';
 
-export function hexToRgb(hex: string): RgbColor {
+export function hexToRgb(hex: string): RgbColor | null {
   const clean = hex.replace('#', '');
+  if (!/^[0-9a-fA-F]{3,8}$/.test(clean) || (clean.length !== 3 && clean.length !== 6 && clean.length !== 8)) {
+    return null;
+  }
   if (clean.length === 3) {
     const r = parseInt(clean[0] + clean[0], 16) / 255;
     const g = parseInt(clean[1] + clean[1], 16) / 255;
@@ -38,19 +41,41 @@ export function parsePx(value: string): number {
 
 export function parseBoxShadow(shadow: string): FigmaEffect[] | null {
   if (!shadow || shadow === 'none') return null;
-  const parts = shadow.split(',').map(s => s.trim());
+
+  // Split on commas that are NOT inside parentheses
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (let i = 0; i < shadow.length; i++) {
+    const ch = shadow[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+
   const effects: FigmaEffect[] = [];
   for (const part of parts) {
     const inset = part.includes('inset');
     const clean = part.replace('inset', '').trim();
-    const values = clean.match(/([-\d.]+)px/g);
-    if (!values || values.length < 3) continue;
-    const offsetX = parseFloat(values[0]);
-    const offsetY = parseFloat(values[1]);
-    const blur = parseFloat(values[2]);
-    const spread = values[3] ? parseFloat(values[3]) : 0;
-    const colorMatch = clean.match(/(rgba?\([^)]+\)|#[a-fA-F0-9]+|[a-z]+)(?=\s*$|$)/);
-    const color = colorMatch ? parseColor(colorMatch[1]) : { r: 0, g: 0, b: 0, a: 0.25 };
+    const values: number[] = [];
+    const pxRegex = /([-]?\d*\.?\d+)px/g;
+    let m: RegExpExecArray | null;
+    while ((m = pxRegex.exec(clean)) !== null) {
+      values.push(parseFloat(m[1]));
+    }
+    if (values.length < 3) continue;
+    const offsetX = values[0];
+    const offsetY = values[1];
+    const blur = values[2];
+    const spread = values.length >= 4 ? values[3] : 0;
+    const colorMatch = clean.match(/(rgba?\([^)]+\)|#[a-fA-F0-9]+|[a-z]+)(?:\s*$|$)/);
+    const color = colorMatch ? parseColor(colorMatch[1]) : null;
     if (!color) continue;
     effects.push({
       type: inset ? 'INNER_SHADOW' : 'DROP_SHADOW',
