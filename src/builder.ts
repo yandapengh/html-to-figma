@@ -6,6 +6,9 @@ export function applyFills(node: FrameNode | RectangleNode | TextNode, fills: Fi
     if (f.type === 'SOLID' && f.color) {
       return { type: 'SOLID', color: f.color, opacity: f.color.a };
     }
+    if (f.type === 'IMAGE' && f.imageHash) {
+      return { type: 'IMAGE', scaleMode: f.scaleMode || 'FILL', imageHash: f.imageHash };
+    }
     return { type: 'SOLID', color: { r: 0, g: 0, b: 0 } };
   });
   node.fills = figmaFills;
@@ -128,10 +131,10 @@ export function createFigmaNode(spec: FigmaNodeSpec): ResizableNode {
 }
 
 export function buildFromSpec(root: FigmaNodeSpec): FrameNode {
-  function build(spec: FigmaNodeSpec, parent: FrameNode): ResizableNode {
+  function build(spec: FigmaNodeSpec, parent: BaseNode & ChildrenMixin): SceneNode {
     const node = createFigmaNode(spec);
 
-    if (spec.children) {
+    if (spec.children && 'appendChild' in node) {
       for (const childSpec of spec.children) {
         build(childSpec, node as FrameNode);
       }
@@ -161,6 +164,11 @@ export function buildFromSpec(root: FigmaNodeSpec): FrameNode {
     rootFrame.resize(root.width, root.height);
   }
 
+  if (root.cornerRadius !== undefined) rootFrame.cornerRadius = root.cornerRadius;
+  if (root.opacity !== undefined) rootFrame.opacity = root.opacity;
+  if (root.clipsContent) rootFrame.clipsContent = true;
+  if (root.strokes) applyStrokes(rootFrame, root.strokes);
+  if (root.effects) applyEffects(rootFrame, root.effects);
   if (root.fills) applyFills(rootFrame, root.fills);
   if (root.children) {
     for (const childSpec of root.children) {

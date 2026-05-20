@@ -9,7 +9,6 @@ const mockCreate = {
   rectangle: vi.fn(),
   vector: vi.fn(),
   line: vi.fn(),
-  group: vi.fn(),
 };
 
 (global as any).figma = {
@@ -47,10 +46,7 @@ const mockCreate = {
     mockCreate.line();
     return { name: '', resize: vi.fn(), appendChild: mockAppend, x: 0, y: 0 };
   },
-  createGroup: () => {
-    mockCreate.group();
-    return { name: '', resize: vi.fn(), appendChild: mockAppend, x: 0, y: 0 };
-  },
+
   viewport: { center: { x: 0, y: 0 } },
   ui: { postMessage: vi.fn() },
 };
