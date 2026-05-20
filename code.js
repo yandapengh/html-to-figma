@@ -255,7 +255,11 @@
     if (fills.length === 0) return;
     const figmaFills = fills.map((f) => {
       if (f.type === "SOLID" && f.color) {
-        return { type: "SOLID", color: f.color, opacity: f.color.a };
+        return {
+          type: "SOLID",
+          color: { r: f.color.r, g: f.color.g, b: f.color.b },
+          opacity: f.color.a
+        };
       }
       if (f.type === "IMAGE" && f.imageHash) {
         return { type: "IMAGE", scaleMode: f.scaleMode || "FILL", imageHash: f.imageHash };
@@ -410,7 +414,28 @@
 
   // code.ts
   figma.showUI(__html__, { width: 320, height: 520 });
-  figma.ui.onmessage = (msg) => {
+  function collectFonts(spec) {
+    const fonts = [];
+    if (spec.fontName) {
+      fonts.push(spec.fontName);
+    }
+    if (spec.children) {
+      for (const child of spec.children) {
+        fonts.push(...collectFonts(child));
+      }
+    }
+    return fonts;
+  }
+  function dedupeFonts(fonts) {
+    const seen = /* @__PURE__ */ new Set();
+    return fonts.filter((f) => {
+      const key = `${f.family}|${f.style}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  figma.ui.onmessage = async (msg) => {
     if (msg.type === "generate-from-node") {
       if (!msg.node) {
         figma.notify("Error: No node data received");
@@ -418,6 +443,8 @@
       }
       try {
         const spec = mapToFigmaSpec(msg.node);
+        const fonts = dedupeFonts(collectFonts(spec));
+        await Promise.all(fonts.map((f) => figma.loadFontAsync(f)));
         const frame = buildFromSpec(spec);
         figma.currentPage.appendChild(frame);
         figma.viewport.scrollAndZoomIntoView([frame]);

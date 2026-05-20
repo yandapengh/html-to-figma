@@ -4,7 +4,11 @@ export function applyFills(node: FrameNode | RectangleNode | TextNode, fills: Fi
   if (fills.length === 0) return;
   const figmaFills: Paint[] = fills.map(f => {
     if (f.type === 'SOLID' && f.color) {
-      return { type: 'SOLID', color: f.color, opacity: f.color.a };
+      return {
+        type: 'SOLID',
+        color: { r: f.color.r, g: f.color.g, b: f.color.b },
+        opacity: f.color.a,
+      };
     }
     if (f.type === 'IMAGE' && f.imageHash) {
       return { type: 'IMAGE', scaleMode: f.scaleMode || 'FILL', imageHash: f.imageHash };
