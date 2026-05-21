@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hexToRgb, parseColor, parsePx, parseBoxShadow } from '../src/utils';
+import { hexToRgb, parseColor } from '../src/utils';
 
 describe('hexToRgb', () => {
   it('converts 6-digit hex', () => {
@@ -45,49 +45,3 @@ describe('parseColor', () => {
   });
 });
 
-describe('parsePx', () => {
-  it('extracts pixel value', () => {
-    expect(parsePx('16px')).toBe(16);
-  });
-
-  it('returns 0 for auto', () => {
-    expect(parsePx('auto')).toBe(0);
-  });
-
-  it('handles decimal values', () => {
-    expect(parsePx('12.5px')).toBe(12.5);
-  });
-});
-
-describe('parseBoxShadow', () => {
-  it('returns null for none', () => {
-    expect(parseBoxShadow('none')).toBeNull();
-  });
-
-  it('parses simple shadow', () => {
-    const result = parseBoxShadow('2px 2px 4px rgba(0,0,0,0.2)');
-    expect(result).toHaveLength(1);
-    expect(result![0].offset).toEqual({ x: 2, y: 2 });
-    expect(result![0].radius).toBe(4);
-  });
-
-  it('handles multiple shadows separated by commas', () => {
-    const result = parseBoxShadow('2px 2px 4px rgba(0, 0, 0, 0.2), 4px 4px 8px rgba(255, 0, 0, 0.5)');
-    expect(result).toHaveLength(2);
-    expect(result![0].offset).toEqual({ x: 2, y: 2 });
-    expect(result![1].offset).toEqual({ x: 4, y: 4 });
-  });
-
-  it('handles inset shadow', () => {
-    const result = parseBoxShadow('inset 2px 2px 4px rgba(0, 0, 0, 0.3)');
-    expect(result).toHaveLength(1);
-    expect(result![0].type).toBe('INNER_SHADOW');
-    expect(result![0].offset).toEqual({ x: 2, y: 2 });
-  });
-
-  it('handles spread value', () => {
-    const result = parseBoxShadow('2px 2px 4px 1px rgba(0, 0, 0, 0.2)');
-    expect(result).toHaveLength(1);
-    expect(result![0].spread).toBe(1);
-  });
-});

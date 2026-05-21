@@ -39,11 +39,13 @@
     .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
     .btn-secondary { background: #f0f0f0; color: #333; }
     .progress { margin-bottom: 8px; font-size: 11px; color: #999; text-align: center; }
+    .option-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 11px; }
+    .option-row input[type="checkbox"] { margin-right: 4px; }
   </style>
 </head>
 <body>
-  <h2>AI HTML to Figma</h2>
-  <p class="subtitle">Convert AI-generated HTML to Figma Auto Layout frames</p>
+  <h2>HTML to Figma</h2>
+  <p class="subtitle">Convert HTML to Figma layers using absolute positioning</p>
 
   <div class="drop-zone" id="dropZone">
     <p>Click or drag .html files here</p>
@@ -56,133 +58,720 @@
     <p>Select a file to preview</p>
   </div>
 
+  <div class="option-row">
+    <input type="checkbox" id="useFramesCb" checked>
+    <label for="useFramesCb">Use Frames (build layer tree with constraints)</label>
+  </div>
+
   <div class="progress" id="progress"></div>
 
   <button class="btn btn-primary" id="generateBtn" disabled>Generate in Figma</button>
+  <button class="btn btn-secondary" id="extractBtn">Extract Canvas Info</button>
   <button class="btn btn-secondary" id="closeBtn">Close</button>
 
   <script>
-  // --- HTML Extractor (inlined from src/extractor.ts) ---
+  // --- htmlToFigma extractor (ported from BuilderIO/html-to-figma) ---
+  // Runs inside the iframe context to extract DOM → Figma layers.
   (function () {
-    var ANIMATION_OVERRIDE = '*, *::before, *::after{animation:none!important;animation-duration:0s!important;transition:none!important;transition-duration:0s!important;transform:none!important}';
+    // Disable animations for capture
+    var ANIMATION_OVERRIDE = '*,*::before,*::after{animation:none!important;animation-duration:0s!important;transition:none!important;transition-duration:0s!important;transform:none!important}';
 
     function stripAnimations(doc) {
-      var style = doc.createElement('style');
-      style.textContent = ANIMATION_OVERRIDE;
-      doc.head.appendChild(style);
-      doc.querySelectorAll('script').forEach(function(el) { el.remove(); });
-      doc.querySelectorAll('canvas, video, audio, iframe').forEach(function(el) { el.remove(); });
-      doc.querySelectorAll('[aria-hidden="true"]').forEach(function(el) { el.remove(); });
+      try {
+        var style = doc.createElement('style');
+        style.textContent = ANIMATION_OVERRIDE;
+        doc.head.appendChild(style);
+      } catch(e) {}
     }
 
-    function extractStyle(el) {
-      var cs = window.getComputedStyle(el);
-      var px = function(prop) {
-        var v = cs.getPropertyValue(prop);
-        var m = v.match(/^([\d.]+)px$/);
-        return m ? parseFloat(m[1]) : 0;
-      };
-
-      var paddingTop = px('padding-top');
-      var paddingRight = px('padding-right');
-      var paddingBottom = px('padding-bottom');
-      var paddingLeft = px('padding-left');
-      var marginTop = px('margin-top');
-      var marginRight = px('margin-right');
-      var marginBottom = px('margin-bottom');
-      var marginLeft = px('margin-left');
-      var borderTopWidth = px('border-top-width');
-      var borderRightWidth = px('border-right-width');
-      var borderBottomWidth = px('border-bottom-width');
-      var borderLeftWidth = px('border-left-width');
-
-      var width = cs.getPropertyValue('width');
-      var height = cs.getPropertyValue('height');
-      var widthPx = width.endsWith('px') ? parseFloat(width) : el.getBoundingClientRect().width;
-      var heightPx = height.endsWith('px') ? parseFloat(height) : el.getBoundingClientRect().height;
-      var gapPx = px('column-gap') || px('gap') || px('row-gap');
-
-      return {
-        display: cs.getPropertyValue('display'),
-        position: cs.getPropertyValue('position'),
-        flexDirection: cs.getPropertyValue('flex-direction'),
-        justifyContent: cs.getPropertyValue('justify-content'),
-        alignItems: cs.getPropertyValue('align-items'),
-        flexWrap: cs.getPropertyValue('flex-wrap'),
-        gap: gapPx, width: Math.round(widthPx), height: Math.round(heightPx),
-        paddingTop: paddingTop, paddingRight: paddingRight, paddingBottom: paddingBottom, paddingLeft: paddingLeft,
-        marginTop: marginTop, marginRight: marginRight, marginBottom: marginBottom, marginLeft: marginLeft,
-        color: cs.getPropertyValue('color'),
-        backgroundColor: cs.getPropertyValue('background-color'),
-        backgroundImage: cs.getPropertyValue('background-image'),
-        fontSize: px('font-size'),
-        fontFamily: cs.getPropertyValue('font-family').split(',')[0].replace(/['"]/g, '').trim(),
-        fontWeight: parseFloat(cs.getPropertyValue('font-weight')) || 400,
-        fontStyle: cs.getPropertyValue('font-style'),
-        lineHeight: parseFloat(cs.getPropertyValue('line-height')) || px('font-size') * 1.2,
-        letterSpacing: px('letter-spacing'),
-        textAlign: cs.getPropertyValue('text-align'),
-        textDecoration: cs.getPropertyValue('text-decoration'),
-        borderTopWidth: borderTopWidth, borderRightWidth: borderRightWidth,
-        borderBottomWidth: borderBottomWidth, borderLeftWidth: borderLeftWidth,
-        borderTopColor: cs.getPropertyValue('border-top-color'),
-        borderRightColor: cs.getPropertyValue('border-right-color'),
-        borderBottomColor: cs.getPropertyValue('border-bottom-color'),
-        borderLeftColor: cs.getPropertyValue('border-left-color'),
-        borderRadius: px('border-radius'),
-        borderTopLeftRadius: px('border-top-left-radius'),
-        borderTopRightRadius: px('border-top-right-radius'),
-        borderBottomRightRadius: px('border-bottom-right-radius'),
-        borderBottomLeftRadius: px('border-bottom-left-radius'),
-        boxShadow: cs.getPropertyValue('box-shadow'),
-        opacity: parseFloat(cs.getPropertyValue('opacity')) || 1,
-        overflow: cs.getPropertyValue('overflow'),
-        boxSizing: cs.getPropertyValue('box-sizing'),
-        tagName: el.tagName.toLowerCase()
-      };
+    // --- bounding rect helpers ---
+    function getDirectionMostOfElements(direction, elements) {
+      if (elements.length === 1) return elements[0];
+      return elements.reduce(function(memo, value) {
+        if (!memo) return value;
+        var memoRect = getBoundingClientRect(memo);
+        var valRect = getBoundingClientRect(value);
+        if (direction === 'left' || direction === 'top') {
+          return valRect[direction] < memoRect[direction] ? value : memo;
+        } else {
+          return valRect[direction] > memoRect[direction] ? value : memo;
+        }
+      }, null);
     }
 
-    function extractNode(el) {
-      var tag = el.tagName.toLowerCase();
-      var children = [];
-      var text = '';
-      for (var i = 0; i < el.childNodes.length; i++) {
-        var child = el.childNodes[i];
-        if (child.nodeType === Node.TEXT_NODE) {
-          var content = child.textContent ? child.textContent.trim() : '';
-          if (content) text += content;
-        } else if (child.nodeType === Node.ELEMENT_NODE) {
-          var childEl = child;
-          var display = window.getComputedStyle(childEl).getPropertyValue('display');
-          if (display === 'none') continue;
-          children.push(extractNode(childEl));
+    function getAggregateRectOfElements(elements) {
+      if (!elements.length) return null;
+      var top = getBoundingClientRect(getDirectionMostOfElements('top', elements)).top;
+      var left = getBoundingClientRect(getDirectionMostOfElements('left', elements)).left;
+      var bottom = getBoundingClientRect(getDirectionMostOfElements('bottom', elements)).bottom;
+      var right = getBoundingClientRect(getDirectionMostOfElements('right', elements)).right;
+      return { top: top, left: left, bottom: bottom, right: right, width: right - left, height: bottom - top };
+    }
+
+    function getBoundingClientRect(el) {
+      var computed = getComputedStyle(el);
+      var display = computed.display;
+      if (display && display.indexOf('inline') !== -1 && el.children.length) {
+        var elRect = el.getBoundingClientRect();
+        var aggregateRect = getAggregateRectOfElements(Array.from(el.children));
+        if (aggregateRect) {
+          if (elRect.width > aggregateRect.width) {
+            return { top: aggregateRect.top, left: elRect.left, bottom: aggregateRect.bottom,
+              right: elRect.right, width: elRect.width, height: aggregateRect.height };
+          }
+          return aggregateRect;
         }
       }
-      return { tag: tag, children: children, text: text, style: extractStyle(el) };
+      var r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, bottom: r.bottom, right: r.right, width: r.width, height: r.height };
     }
 
+    function isHidden(element) {
+      var el = element;
+      do {
+        var computed = getComputedStyle(el);
+        if (computed.display === 'none' || computed.visibility === 'hidden') return true;
+        if (computed.overflow !== 'visible' && el.getBoundingClientRect().height < 1) return true;
+      } while ((el = el.parentElement));
+      return false;
+    }
+
+    // --- color parser ---
+    function getRgb(colorString) {
+      if (!colorString) return null;
+      var match = colorString.match(/rgba?\(([\d\.]+), ([\d\.]+), ([\d\.]+)(, ([\d\.]+))?\)/);
+      if (!match) return null;
+      var r = match[1], g = match[2], b = match[3], a = match[5];
+      if (a && parseFloat(a) === 0) return null;
+      if (r && g && b) {
+        return { r: parseInt(r) / 255, g: parseInt(g) / 255, b: parseInt(b) / 255, a: a ? parseFloat(a) : 1 };
+      }
+      return null;
+    }
+
+    function parseUnits(str) {
+      if (!str) return null;
+      var match = str.match(/([\d\.]+)px/);
+      if (match && match[1]) return { unit: 'PIXELS', value: parseFloat(match[1]) };
+      return null;
+    }
+
+    function getUrl(url) {
+      if (!url) return '';
+      var final = url.trim();
+      if (final.indexOf('//') === 0) final = 'https:' + final;
+      if (final.indexOf('/') === 0) final = 'https://' + location.host + final;
+      return final;
+    }
+
+    // --- style extraction ---
+    function getAppliedComputedStyles(element) {
+      // nodeType 1 = ELEMENT_NODE (works cross-frame, unlike instanceof)
+      if (!element || element.nodeType !== 1) return {};
+      var styles = getComputedStyle(element);
+      var list = ['opacity','backgroundColor','border','borderTop','borderLeft','borderRight','borderBottom',
+        'borderRadius','backgroundImage','borderColor','boxShadow'];
+      var color = styles.color;
+      var defaults = {
+        transform: 'none', opacity: '1', borderRadius: '0px', backgroundImage: 'none',
+        backgroundColor: 'rgba(0, 0, 0, 0)', boxShadow: 'none',
+        border: '0px none ' + color,
+        borderTop: '0px none ' + color, borderBottom: '0px none ' + color,
+        borderLeft: '0px none ' + color, borderRight: '0px none ' + color,
+        borderWidth: '0px', borderColor: color, borderStyle: 'none'
+      };
+      var result = {};
+      for (var i = 0; i < list.length; i++) {
+        var key = list[i];
+        if (styles[key] && styles[key] !== defaults[key]) {
+          result[key] = styles[key];
+        }
+      }
+      return result;
+    }
+
+    function size(obj) { return Object.keys(obj).length; }
+
+    // --- text extraction ---
+    function textNodesUnder(el) {
+      var n, a = [];
+      var walk = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+      while ((n = walk.nextNode())) a.push(n);
+      return a;
+    }
+
+    // --- fast clone ---
+    function fastClone(data) {
+      return typeof data === 'symbol' ? null : JSON.parse(JSON.stringify(data));
+    }
+
+    // --- box-shadow parser ---
+    var LENGTH_REG = /^[0-9]+[a-zA-Z%]+?$/;
+    function isLength(v) { return v === '0' || LENGTH_REG.test(v); }
+
+    function toNum(v) {
+      if (!/px$/.test(v) && v !== '0') return 0;
+      var n = parseFloat(v);
+      return !isNaN(n) ? n : 0;
+    }
+
+    function parseBoxShadowValue(str) {
+      if (str.indexOf('rgb') === 0) {
+        var colorMatch = str.match(/(rgba?\(.+?\))(.+)/);
+        if (colorMatch) str = (colorMatch[2] + ' ' + colorMatch[1]).trim();
+      }
+      var parts = str.split(/\s(?![^(]*\))/);
+      var inset = parts.indexOf('inset') !== -1;
+      var last = parts.slice(-1)[0];
+      var color = !isLength(last) ? last : 'rgba(0, 0, 0, 1)';
+      var nums = parts.filter(function(n) { return n !== 'inset' && n !== color; }).map(toNum);
+      return { inset: inset, offsetX: nums[0] || 0, offsetY: nums[1] || 0,
+        blurRadius: nums[2] || 0, spreadRadius: nums[3] || 0, color: color };
+    }
+
+    // --- hasChildren ---
+    function hasChildren(node) {
+      return node && Array.isArray(node.children);
+    }
+
+    // --- traverse ---
+    function traverse(layer, cb, parent) {
+      if (layer) {
+        cb(layer, parent);
+        if (hasChildren(layer)) {
+          layer.children.forEach(function(child) { traverse(child, cb, layer); });
+        }
+      }
+    }
+
+    // --- makeTree: build frame hierarchy ---
+    function makeTree(root, layers, refMap, doc) {
+      doc = doc || document;
+      function getParent(layer) {
+        var response = null;
+        try {
+          traverse(root, function(child) {
+            if (child && child.children && child.children.indexOf(layer) !== -1) {
+              response = child;
+              throw 'DONE';
+            }
+          });
+        } catch(err) { if (err !== 'DONE') console.error(err); }
+        return response;
+      }
+
+      var updated = true;
+      var iterations = 0;
+      while (updated) {
+        updated = false;
+        if (iterations++ > 10000) { console.error('Too many tree iterations 1'); break; }
+        traverse(root, function(layer, originalParent) {
+          var node = layer.ref;
+          var parentElement = node && node.parentElement;
+          do {
+            if (parentElement === doc.body) break;
+            if (parentElement && parentElement !== doc.body) {
+              var parentLayer = refMap.get(parentElement);
+              if (parentLayer === originalParent) break;
+              if (parentLayer && parentLayer !== root) {
+                if (hasChildren(parentLayer)) {
+                  if (originalParent) {
+                    var idx = originalParent.children.indexOf(layer);
+                    originalParent.children.splice(idx, 1);
+                    parentLayer.children.push(layer);
+                    updated = true;
+                    return;
+                  }
+                } else {
+                  var parentRef = parentLayer.ref;
+                  // cross-frame compat: nodeType check instead of instanceof
+                  if (parentRef && parentRef.nodeType === Node.TEXT_NODE) {
+                    parentRef = parentRef.parentElement;
+                  }
+                  var overflowHidden = parentRef && parentRef.nodeType === 1 && getComputedStyle(parentRef).overflow !== 'visible';
+                  var newParent = {
+                    type: 'FRAME', clipsContent: !!overflowHidden,
+                    x: parentLayer.x, y: parentLayer.y,
+                    width: parentLayer.width, height: parentLayer.height,
+                    ref: parentLayer.ref, backgrounds: [],
+                    children: [parentLayer, layer]
+                  };
+                  var gp = getParent(parentLayer);
+                  if (!gp) { console.warn('CANT FIND PARENT', JSON.stringify({ type: parentLayer.type }));
+                    parentElement = parentElement.parentElement; continue; }
+                  if (originalParent) {
+                    var idx2 = originalParent.children.indexOf(layer);
+                    originalParent.children.splice(idx2, 1);
+                  }
+                  delete parentLayer.ref;
+                  var newIdx = gp.children.indexOf(parentLayer);
+                  refMap.set(parentElement, newParent);
+                  gp.children.splice(newIdx, 1, newParent);
+                  updated = true;
+                  return;
+                }
+              }
+            }
+          } while (parentElement && (parentElement = parentElement.parentElement));
+        });
+      }
+
+      // Second pass: LCA grouping
+      function getParents(node) {
+        // cross-frame compat: nodeType check instead of instanceof
+        var el = (node && node.nodeType === Node.TEXT_NODE) ? node.parentElement : node;
+        var parents = [];
+        while (el && (el = el.parentElement)) parents.push(el);
+        return parents;
+      }
+      function getDepth(node) { return getParents(node).length; }
+
+      var secondUpdate = true;
+      var secondIterations = 0;
+      while (secondUpdate) {
+        if (secondIterations++ > 10000) { console.error('Too many tree iterations 2'); break; }
+        secondUpdate = false;
+        traverse(root, function(layer, parent) {
+          if (secondUpdate) return;
+          if (layer.type === 'FRAME' && layer.children && layer.children.length > 2) {
+            var childRefs = layer.children.map(function(c) { return c.ref; });
+            var lowestCD = layer.ref;
+            var lowestCDDepth = getDepth(lowestCD);
+            for (var ri = 0; ri < childRefs.length; ri++) {
+              var childRef = childRefs[ri];
+              var otherRefs = childRefs.filter(function(item) { return item !== childRef; });
+              var childParents = getParents(childRef);
+              for (var oj = 0; oj < otherRefs.length; oj++) {
+                var otherParents = getParents(otherRefs[oj]);
+                for (var pk = 0; pk < otherParents.length; pk++) {
+                  var p = otherParents[pk];
+                  if (childParents.indexOf(p) !== -1 && layer.ref.contains(p)) {
+                    var d = getDepth(p);
+                    if (d > lowestCDDepth) { lowestCD = p; lowestCDDepth = d; }
+                  }
+                }
+              }
+            }
+            if (lowestCD && lowestCD !== layer.ref) {
+              var newChildren = layer.children.filter(function(item) { return lowestCD.contains(item.ref); });
+              if (newChildren.length !== layer.children.length) {
+                var lcdRect = getBoundingClientRect(lowestCD);
+                var ofHidden = lowestCD && lowestCD.nodeType === 1 && getComputedStyle(lowestCD).overflow !== 'visible';
+                var newParent = {
+                  type: 'FRAME', clipsContent: !!ofHidden, ref: lowestCD,
+                  x: lcdRect.left, y: lcdRect.top,
+                  width: lcdRect.width, height: lcdRect.height,
+                  backgrounds: [], children: newChildren
+                };
+                refMap.set(lowestCD, refMap.get(layer.ref) || layer.ref);
+                var firstIdx = layer.children.length - 1;
+                for (var ci = 0; ci < newChildren.length; ci++) {
+                  var cidx = layer.children.indexOf(newChildren[ci]);
+                  if (cidx > -1 && cidx < firstIdx) firstIdx = cidx;
+                }
+                layer.children.splice(firstIdx, 0, newParent);
+                for (var di = 0; di < newChildren.length; di++) {
+                  var ridx = layer.children.indexOf(newChildren[di]);
+                  if (ridx > -1) layer.children.splice(ridx, 1);
+                }
+                secondUpdate = true;
+              }
+            }
+          }
+        });
+      }
+
+      // Update positions relative to parents
+      traverse(root, function(layer) {
+        if (layer.type === 'FRAME' || layer.type === 'GROUP') {
+          var lx = layer.x, ly = layer.y;
+          if (lx || ly) {
+            traverse(layer, function(child) {
+              if (child === layer) return;
+              child.x = child.x - lx;
+              child.y = child.y - ly;
+            });
+          }
+        }
+      });
+    }
+
+    // --- addConstraints ---
+    function addConstraints(layers) {
+      layers.forEach(function(layer) {
+        traverse(layer, function(child) {
+          if (child.type === 'SVG') {
+            child.constraints = { horizontal: 'CENTER', vertical: 'MIN' };
+            return;
+          }
+          var ref = child.ref;
+          if (!ref) {
+            child.constraints = { horizontal: 'SCALE', vertical: 'MIN' };
+            return;
+          }
+          // cross-frame: text nodes have nodeType 3, elements have nodeType 1
+          var el = ref && (ref.nodeType === Node.ELEMENT_NODE || ref.nodeType === 1) ? ref : ref.parentElement;
+          var parentEl = el && el.parentElement;
+          if (!el || !parentEl) {
+            child.constraints = { horizontal: 'SCALE', vertical: 'MIN' };
+            return;
+          }
+          var computed = getComputedStyle(el);
+          var parentStyle = getComputedStyle(parentEl);
+          var hasAutoMarginLeft = computed.marginLeft === 'auto';
+          var hasAutoMarginRight = computed.marginRight === 'auto';
+          var hasAutoMarginTop = computed.marginTop === 'auto';
+          var hasAutoMarginBottom = computed.marginBottom === 'auto';
+          var isInline = computed.display && computed.display.indexOf('inline') !== -1;
+
+          if (isInline) {
+            if (parentStyle.textAlign === 'center') { hasAutoMarginLeft = true; hasAutoMarginRight = true; }
+            else if (parentStyle.textAlign === 'right') { hasAutoMarginLeft = true; }
+            if (computed.verticalAlign === 'middle') { hasAutoMarginTop = true; hasAutoMarginBottom = true; }
+            else if (computed.verticalAlign === 'bottom') { hasAutoMarginTop = true; hasAutoMarginBottom = false; }
+          }
+
+          var parentJustifyCenter = parentStyle.display === 'flex' && parentStyle.justifyContent === 'center';
+          var parentAlignCenter = parentStyle.display === 'flex' && parentStyle.alignItems === 'center';
+          if (parentJustifyCenter) { hasAutoMarginLeft = true; hasAutoMarginRight = true; }
+          if (parentAlignCenter) { hasAutoMarginTop = true; hasAutoMarginBottom = true; }
+
+          if (child.type === 'TEXT') {
+            if (computed.textAlign === 'center') { hasAutoMarginLeft = true; hasAutoMarginRight = true; }
+            else if (computed.textAlign === 'right') { hasAutoMarginLeft = true; hasAutoMarginRight = false; }
+          }
+
+          child.constraints = {
+            horizontal: hasAutoMarginLeft && hasAutoMarginRight ? 'CENTER' : hasAutoMarginLeft ? 'MAX' : 'SCALE',
+            vertical: hasAutoMarginBottom && hasAutoMarginTop ? 'CENTER' : hasAutoMarginTop ? 'MAX' : 'MIN'
+          };
+        });
+      });
+    }
+
+    // --- removeRefs ---
+    function removeRefs(layers) {
+      layers.forEach(function(layer) {
+        traverse(layer, function(child) { delete child.ref; });
+      });
+    }
+
+    // --- htmlToFigma main function ---
+    // rootElement = container element (body), doc = iframe document, win = iframe window
+    // Returns an array of LayerNode objects.
+    function htmlToFigma(rootElement, options, doc, win) {
+      doc = doc || document;
+      win = win || window;
+      var useFrames = options && options.useFrames;
+      var layers = [];
+      var el = rootElement || doc.body;
+
+      // Resolve SVG <use> elements
+      Array.from(el.querySelectorAll('use')).forEach(function(use) {
+        try {
+          var symbolSelector = use.href.baseVal;
+          var symbol = doc.querySelector(symbolSelector);
+          if (symbol) use.outerHTML = symbol.innerHTML;
+        } catch(err) {}
+      });
+
+      // Shadow DOM support
+      var getShadowEls = function(root) {
+        var result = [];
+        if (!root.shadowRoot) return result;
+        Array.from(root.shadowRoot.querySelectorAll('*')).forEach(function(sEl) {
+          result.push(sEl);
+          result = result.concat(getShadowEls(sEl));
+        });
+        return result;
+      };
+
+      var els = [];
+      Array.from(el.querySelectorAll('*')).forEach(function(e) {
+        els.push(e);
+        els = els.concat(getShadowEls(e));
+      });
+
+      // Process each element
+      els.forEach(function(el) {
+        if (isHidden(el)) return;
+
+        // Full SVG element (tagName is lowercase 'svg' for SVG elements)
+        if (el.tagName === 'svg') {
+          var svgRect = el.getBoundingClientRect();
+          layers.push({
+            type: 'SVG', ref: el, svg: el.outerHTML,
+            x: Math.round(svgRect.left), y: Math.round(svgRect.top),
+            width: Math.round(svgRect.width), height: Math.round(svgRect.height)
+          });
+          return;
+        }
+
+        // Child SVG element (skip) - check namespaceURI for cross-frame compat
+        if (el.namespaceURI === 'http://www.w3.org/2000/svg') return;
+
+        // Skip elements inside <picture>
+        if (el.parentElement && el.parentElement.tagName === 'PICTURE') return;
+
+        var appliedStyles = getAppliedComputedStyles(el);
+        var computedStyle = getComputedStyle(el);
+
+        if (!(size(appliedStyles) || el.tagName === 'IMG' ||
+            el.tagName === 'PICTURE' || el.tagName === 'VIDEO')) return;
+        if (computedStyle.display === 'none') return;
+
+        var rect = getBoundingClientRect(el);
+        if (rect.width < 1 || rect.height < 1) return;
+
+        var fills = [];
+        var color = getRgb(computedStyle.backgroundColor);
+        if (color) {
+          fills.push({ type: 'SOLID', color: { r: color.r, g: color.g, b: color.b }, opacity: color.a || 1 });
+        }
+
+        var rectNode = {
+          type: 'RECTANGLE', ref: el,
+          x: Math.round(rect.left), y: Math.round(rect.top),
+          width: Math.round(rect.width), height: Math.round(rect.height),
+          fills: fills
+        };
+
+        // Uniform border
+        if (computedStyle.border) {
+          var parsed = computedStyle.border.match(/^([\d\.]+)px\s*(\w+)\s*(.*)$/);
+          if (parsed) {
+            var bWidth = parsed[1], bType = parsed[2], bColor = parsed[3];
+            if (bWidth && bWidth !== '0' && bType !== 'none' && bColor) {
+              var rgb = getRgb(bColor);
+              if (rgb) {
+                rectNode.strokes = [{ type: 'SOLID', color: { r: rgb.r, g: rgb.g, b: rgb.b }, opacity: rgb.a || 1 }];
+                rectNode.strokeWeight = Math.round(parseFloat(bWidth));
+              }
+            }
+          }
+        }
+
+        // Non-uniform borders - create individual side rectangles
+        if (!rectNode.strokes) {
+          var directions = ['top', 'left', 'right', 'bottom'];
+          for (var di = 0; di < directions.length; di++) {
+            var dir = directions[di];
+            var cap = dir[0].toUpperCase() + dir.substring(1);
+            var dirComputed = computedStyle['border' + cap];
+            if (dirComputed) {
+              var dp = dirComputed.match(/^([\d\.]+)px\s*(\w+)\s*(.*)$/);
+              if (dp) {
+                var dbw = dp[1], dbt = dp[2], dbc = dp[3];
+                if (dbw && dbw !== '0' && dbt !== 'none' && dbc) {
+                  var drgb = getRgb(dbc);
+                  if (drgb) {
+                    var bw = parseFloat(dbw);
+                    var sideWidth = (dir === 'top' || dir === 'bottom') ? rect.width : bw;
+                    var sideHeight = (dir === 'left' || dir === 'right') ? rect.height : bw;
+                    var sideX = dir === 'right' ? rect.right - bw : rect.left;
+                    var sideY = dir === 'bottom' ? rect.bottom - bw : rect.top;
+                    layers.push({
+                      ref: el, type: 'RECTANGLE',
+                      x: sideX, y: sideY, width: sideWidth, height: sideHeight,
+                      fills: [{ type: 'SOLID', color: { r: drgb.r, g: drgb.g, b: drgb.b }, opacity: drgb.a || 1 }]
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Background image
+        if (computedStyle.backgroundImage && computedStyle.backgroundImage !== 'none') {
+          var urlMatch = computedStyle.backgroundImage.match(/url\(['"]?(.*?)['"]?\)/);
+          if (urlMatch && urlMatch[1]) {
+            fills.push({ url: urlMatch[1], type: 'IMAGE', scaleMode: computedStyle.backgroundSize === 'contain' ? 'FIT' : 'FILL', imageHash: null });
+          }
+        }
+
+        // <img> elements
+        if (el.tagName === 'IMG' && el.src) {
+          fills.push({ url: el.src, type: 'IMAGE', scaleMode: computedStyle.objectFit === 'contain' ? 'FIT' : 'FILL', imageHash: null });
+        }
+
+        // <picture> elements
+        if (el.tagName === 'PICTURE') {
+          var firstSource = el.querySelector('source');
+          if (firstSource) {
+            var src = firstSource.srcset && firstSource.srcset.split(/[,\s]+/g)[0];
+            if (src) {
+              fills.push({ url: getUrl(src), type: 'IMAGE', scaleMode: computedStyle.objectFit === 'contain' ? 'FIT' : 'FILL', imageHash: null });
+            }
+          }
+        }
+
+        // <video> elements
+        if (el.tagName === 'VIDEO' && el.poster) {
+          fills.push({ url: el.poster, type: 'IMAGE', scaleMode: computedStyle.objectFit === 'contain' ? 'FIT' : 'FILL', imageHash: null });
+        }
+
+        // Box shadow
+        if (computedStyle.boxShadow && computedStyle.boxShadow !== 'none') {
+          var parsedShadow = parseBoxShadowValue(computedStyle.boxShadow);
+          var shadowColor = getRgb(parsedShadow.color);
+          if (shadowColor) {
+            rectNode.effects = [{
+              color: shadowColor, type: 'DROP_SHADOW',
+              radius: parsedShadow.blurRadius, spread: parsedShadow.spreadRadius,
+              blendMode: 'NORMAL', visible: true,
+              offset: { x: parsedShadow.offsetX, y: parsedShadow.offsetY }
+            }];
+          }
+        }
+
+        // Border radius (4 corners)
+        var btlr = parseUnits(computedStyle.borderTopLeftRadius);
+        if (btlr) rectNode.topLeftRadius = btlr.value;
+        var btrr = parseUnits(computedStyle.borderTopRightRadius);
+        if (btrr) rectNode.topRightRadius = btrr.value;
+        var bbrr = parseUnits(computedStyle.borderBottomRightRadius);
+        if (bbrr) rectNode.bottomRightRadius = bbrr.value;
+        var bblr = parseUnits(computedStyle.borderBottomLeftRadius);
+        if (bblr) rectNode.bottomLeftRadius = bblr.value;
+
+        layers.push(rectNode);
+      });
+
+      // --- Text nodes ---
+      var textNodes = textNodesUnder(el);
+      for (var ti = 0; ti < textNodes.length; ti++) {
+        var node = textNodes[ti];
+        if (!node.textContent || !node.textContent.trim().length) continue;
+        var parent = node.parentElement;
+        if (!parent || isHidden(parent)) continue;
+
+        var pComputed = getComputedStyle(parent);
+        var range = parent.ownerDocument.createRange();
+        range.selectNode(node);
+        var tRect = fastClone(range.getBoundingClientRect());
+        var lh = parseUnits(pComputed.lineHeight);
+        range.detach();
+
+        if (lh && tRect.height < lh.value) {
+          var delta = lh.value - tRect.height;
+          tRect.top -= delta / 2;
+          tRect.height = lh.value;
+        }
+        if (tRect.height < 1 || tRect.width < 1) continue;
+
+        var textNode = {
+          x: Math.round(tRect.left), ref: node,
+          y: Math.round(tRect.top),
+          width: Math.round(tRect.width), height: Math.round(tRect.height),
+          type: 'TEXT',
+          characters: node.textContent.trim().replace(/\s+/g, ' ')
+        };
+
+        var tFills = [];
+        var tRgb = getRgb(pComputed.color);
+        if (tRgb) {
+          tFills.push({ type: 'SOLID', color: { r: tRgb.r, g: tRgb.g, b: tRgb.b }, opacity: tRgb.a || 1 });
+        }
+        if (tFills.length) textNode.fills = tFills;
+
+        var ls = parseUnits(pComputed.letterSpacing);
+        if (ls) textNode.letterSpacing = ls;
+        if (lh) textNode.lineHeight = lh;
+
+        var textTransform = pComputed.textTransform;
+        if (textTransform === 'uppercase') textNode.textCase = 'UPPER';
+        else if (textTransform === 'lowercase') textNode.textCase = 'LOWER';
+        else if (textTransform === 'capitalize') textNode.textCase = 'TITLE';
+
+        var fs = parseUnits(pComputed.fontSize);
+        if (fs) textNode.fontSize = Math.round(fs.value);
+
+        if (pComputed.fontFamily) textNode.fontFamily = pComputed.fontFamily;
+
+        if (pComputed.textDecoration === 'underline' || pComputed.textDecoration === 'strikethrough') {
+          textNode.textDecoration = pComputed.textDecoration.toUpperCase();
+        }
+
+        var ta = pComputed.textAlign;
+        if (ta === 'left' || ta === 'center' || ta === 'right' || ta === 'justified') {
+          textNode.textAlignHorizontal = ta.toUpperCase();
+        }
+
+        layers.push(textNode);
+      }
+
+      // Root frame
+      var root = {
+        type: 'FRAME',
+        width: Math.round(win.innerWidth),
+        height: Math.round(doc.documentElement.scrollHeight),
+        x: 0, y: 0, ref: doc.body
+      };
+
+      // Build tree or return flat
+      if (useFrames) {
+        var refMap = new WeakMap();
+        layers.forEach(function(layer) { if (layer.ref) refMap.set(layer.ref, layer); });
+        root.children = layers.slice();
+        makeTree(root, layers, refMap, doc);
+        addConstraints([root]);
+        removeRefs([root]);
+        return [root];
+      }
+
+      layers.unshift(root);
+      removeRefs(layers);
+      return layers;
+    }
+
+    // --- extractFromHtml wrapper (iframe-based extraction) ---
+    // Runs htmlToFigma directly from parent context, passing iframe's doc/window.
+    // getComputedStyle() and getBoundingClientRect() work on iframe elements from parent context.
     window.HtmlExtractor = {
       extractFromHtml: function(html) {
         return new Promise(function(resolve, reject) {
+          // Strip external resource links before loading to avoid CSP violations
+          var cleanHtml = html
+            .replace(/<link[^>]*href=["']https?:\/\/[^"']*["'][^>]*\/?>/gi, '')
+            .replace(/@import\s+url\(['"]?https?:\/\/[^'")\s]*['"]?\)/gi, '');
+
           var iframe = document.createElement('iframe');
           iframe.style.cssText = 'position:absolute;left:-9999px;width:1440px;height:900px;border:none;';
           document.body.appendChild(iframe);
+
           iframe.onload = function() {
             try {
-              var doc = iframe.contentDocument || iframe.contentWindow.document;
-              stripAnimations(doc);
+              var idoc = iframe.contentDocument || iframe.contentWindow.document;
+              var iwin = iframe.contentWindow || iframe.contentWindow;
+              stripAnimations(idoc);
+
               requestAnimationFrame(function() {
                 try {
-                  var body = doc.body || doc.documentElement;
-                  var root = extractNode(body);
+                  var body = idoc.body || idoc.documentElement;
+                  // Call htmlToFigma directly, with iframe's document/window
+                  var result = htmlToFigma(body, { useFrames: window._useFrames !== false }, idoc, iwin);
                   document.body.removeChild(iframe);
-                  resolve(root);
-                } catch(e) { document.body.removeChild(iframe); reject(e); }
+                  console.log('[Extractor] Layers extracted:', result.length);
+                  resolve({ layers: result });
+                } catch(e) {
+                  document.body.removeChild(iframe);
+                  console.error('[Extractor] Error:', e);
+                  reject(e);
+                }
               });
-            } catch(e) { document.body.removeChild(iframe); reject(e); }
+            } catch(e) {
+              document.body.removeChild(iframe);
+              reject(e);
+            }
           };
-          iframe.onerror = function() { document.body.removeChild(iframe); reject(new Error('Failed to load HTML')); };
-          iframe.srcdoc = html;
+
+          iframe.onerror = function() {
+            document.body.removeChild(iframe);
+            reject(new Error('Failed to load HTML'));
+          };
+
+          iframe.srcdoc = cleanHtml;
         });
       }
     };
@@ -190,8 +779,9 @@
 
   // --- UI Logic ---
   var files = [];
-  var extractedNodes = {};
+  var extractedData = {};
   var selectedIndex = -1;
+  window._useFrames = true; // default to frame tree mode
 
   var dropZone = document.getElementById('dropZone');
   var fileInput = document.getElementById('fileInput');
@@ -200,6 +790,9 @@
   var progressEl = document.getElementById('progress');
   var generateBtn = document.getElementById('generateBtn');
   var closeBtn = document.getElementById('closeBtn');
+  var useFramesCb = document.getElementById('useFramesCb');
+
+  useFramesCb.addEventListener('change', function() { window._useFrames = useFramesCb.checked; });
 
   dropZone.addEventListener('click', function() { fileInput.click(); });
   dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -225,7 +818,7 @@
     var item = document.createElement('div');
     item.className = 'file-item';
     item.id = 'file-' + idx;
-    item.innerHTML = '<span class="name">' + file.name + '</span><span class="status" id="status-' + idx + '">Extracting...</span><span class="remove" id="remove-' + idx + '">×</span>';
+    item.innerHTML = '<span class="name">' + file.name + '</span><span class="status" id="status-' + idx + '">Extracting...</span><span class="remove" id="remove-' + idx + '">&times;</span>';
     item.addEventListener('click', function() { selectFile(idx); });
     fileList.appendChild(item);
     document.getElementById('remove-' + idx).addEventListener('click', function(e) { e.stopPropagation(); removeFile(idx); });
@@ -235,13 +828,17 @@
     var idx = files.indexOf(file);
     var reader = new FileReader();
     reader.onload = function(e) {
-      window.HtmlExtractor.extractFromHtml(e.target.result).then(function(node) {
-        extractedNodes[idx] = node;
+      window.HtmlExtractor.extractFromHtml(e.target.result).then(function(data) {
+        extractedData[idx] = data;
         var statusEl = document.getElementById('status-' + idx);
-        if (statusEl) { statusEl.textContent = 'Ready'; statusEl.className = 'status ready'; }
-      }).catch(function() {
+        if (statusEl) {
+          statusEl.textContent = data.layers.length + ' layers';
+          statusEl.className = 'status ready';
+        }
+      }).catch(function(err) {
         var statusEl = document.getElementById('status-' + idx);
         if (statusEl) { statusEl.textContent = 'Failed'; statusEl.className = 'status error'; }
+        console.error(err);
       });
     };
     reader.readAsText(file);
@@ -253,7 +850,7 @@
     var el = document.getElementById('file-' + idx);
     if (el) el.style.background = '#e0f0ff';
     generateBtn.disabled = false;
-    if (extractedNodes[idx]) {
+    if (files[idx]) {
       var file = files[idx];
       var reader = new FileReader();
       reader.onload = function(e) {
@@ -265,17 +862,38 @@
   }
 
   function removeFile(idx) {
-    delete files[idx]; delete extractedNodes[idx];
+    delete files[idx]; delete extractedData[idx];
     var el = document.getElementById('file-' + idx);
     if (el) el.remove();
     if (selectedIndex === idx) { selectedIndex = -1; generateBtn.disabled = true; previewArea.innerHTML = '<p>Select a file to preview</p>'; }
   }
 
   generateBtn.addEventListener('click', function() {
-    if (selectedIndex < 0 || !extractedNodes[selectedIndex]) return;
+    if (selectedIndex < 0 || !extractedData[selectedIndex]) return;
     progressEl.textContent = 'Generating...';
-    parent.postMessage({ pluginMessage: { type: 'generate-from-node', node: extractedNodes[selectedIndex] } }, '*');
+    parent.postMessage({ pluginMessage: { type: 'import', data: extractedData[selectedIndex] } }, '*');
   });
+
+  var extractBtn = document.getElementById('extractBtn');
+  extractBtn.addEventListener('click', function() {
+    parent.postMessage({ pluginMessage: { type: 'extract-canvas' } }, '*');
+  });
+
+  window.onmessage = function(event) {
+    var msg = event.data.pluginMessage;
+    if (!msg) return;
+    if (msg.type === 'canvas-data') {
+      if (msg.error) {
+        console.error('[Canvas Extract Error]', msg.error);
+      } else {
+        console.log('[CANVAS-DATA]', JSON.stringify(msg.data, null, 2));
+      }
+    }
+    if (msg.type === 'doneLoading') {
+      progressEl.textContent = 'Done!';
+      setTimeout(function() { progressEl.textContent = ''; }, 3000);
+    }
+  };
 
   closeBtn.addEventListener('click', function() {
     parent.postMessage({ pluginMessage: { type: 'close' } }, '*');

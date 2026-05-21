@@ -6,6 +6,10 @@
 interface ExtractedStyle {
   display: string;
   position: string;
+  top: number;
+  left: number;
+  right: number;
+  bottom: number;
   flexDirection: string;
   justifyContent: string;
   alignItems: string;
@@ -81,6 +85,8 @@ interface ExtractedNode {
     doc.querySelectorAll('canvas, video, audio, iframe').forEach(el => el.remove());
     // Remove hidden elements
     doc.querySelectorAll('[aria-hidden="true"]').forEach(el => el.remove());
+    // Open all <details> elements so content is visible
+    doc.querySelectorAll('details').forEach(el => el.setAttribute('open', ''));
   }
 
   function extractStyle(el: Element): ExtractedStyle {
@@ -115,6 +121,10 @@ interface ExtractedNode {
     return {
       display: cs.getPropertyValue('display'),
       position: cs.getPropertyValue('position'),
+      top: px('top'),
+      left: px('left'),
+      right: px('right'),
+      bottom: px('bottom'),
       flexDirection: cs.getPropertyValue('flex-direction'),
       justifyContent: cs.getPropertyValue('justify-content'),
       alignItems: cs.getPropertyValue('align-items'),

@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTML to Figma — Implementation Guide</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --surface: #141820;
+    --surface2: #1a1f2b;
+    --border: #252a35;
+    --text: #c8ccd4;
+    --text2: #8b909a;
+    --accent: #5b8def;
+    --accent2: #f0a060;
+    --green: #4db87a;
+    --red: #e0556a;
+    --purple: #9075e6;
+    --font-mono: 'SF Mono', 'JetBrains Mono', 'Menlo', monospace;
+    --font-sans: -apple-system, 'Inter', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Layout ── */
+  .container { max-width: 1040px; margin: 0 auto; padding: 0 40px; }
+
+  /* ── Hero ── */
+  .hero {
+    padding: 100px 0 60px;
+    text-align: center;
+  }
+  .hero .badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: rgba(91,141,239,0.12);
+    color: var(--accent);
+    margin-bottom: 24px;
+  }
+  .hero h1 {
+    font-size: clamp(36px, 5vw, 52px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    color: #e8ecf2;
+    margin-bottom: 20px;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero p {
+    font-size: 18px;
+    color: var(--text2);
+    max-width: 620px;
+    margin: 0 auto 32px;
+  }
+  .hero .meta {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    font-size: 13px;
+    color: var(--text2);
+  }
+  .hero .meta span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .hero .meta .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .hero .meta .dot.blue { background: var(--accent); }
+  .hero .meta .dot.green { background: var(--green); }
+
+  /* ── Sections ── */
+  section { padding: 72px 0; }
+  section + section { border-top: 1px solid var(--border); }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  h2 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #e8ecf2;
+    margin-bottom: 32px;
+  }
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #d8dce3;
+    margin-bottom: 12px;
+  }
+  p.text { color: var(--text2); margin-bottom: 20px; max-width: 680px; }
+
+  /* ── Pipeline overview cards ── */
+  .pipeline-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 800px) { .pipeline-cards { grid-template-columns: repeat(2, 1fr); } }
+
+  .pipe-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+  }
+  .pipe-card .step {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .pipe-card .title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #d8dce3;
+    margin-bottom: 6px;
+  }
+  .pipe-card .desc {
+    font-size: 13px;
+    color: var(--text2);
+    line-height: 1.5;
+  }
+
+  /* ── Canvas section ── */
+  .canvas-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    position: relative;
+    margin-bottom: 24px;
+  }
+  .canvas-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .canvas-toolbar .title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    flex: 1;
+  }
+  .canvas-toolbar button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+  }
+  .canvas-toolbar button:hover { background: var(--border); }
+  canvas {
+    display: block;
+    cursor: grab;
+    width: 100%;
+    height: 560px;
+  }
+  canvas:active { cursor: grabbing; }
+  .canvas-hint {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text2);
+    margin-top: -16px;
+    padding-bottom: 8px;
+  }
+
+  /* ── Code comparison table ── */
+  .cmp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .cmp-table th {
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text2);
+    border-bottom: 2px solid var(--border);
+  }
+  .cmp-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .cmp-table td:first-child { color: var(--red); text-decoration: line-through; text-decoration-color: rgba(224,85,106,0.4); }
+  .cmp-table td:last-child { color: var(--green); }
+
+  /* ── Pitfall cards ── */
+  .pitfalls-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 700px) { .pitfalls-grid { grid-template-columns: 1fr; } }
+
+  .pitfall-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+  }
+  .pitfall-card .icon {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    margin-bottom: 16px;
+  }
+  .pitfall-card .icon.red { background: rgba(224,85,106,0.12); color: var(--red); }
+  .pitfall-card .icon.amber { background: rgba(240,160,96,0.12); color: var(--accent2); }
+  .pitfall-card h4 { font-size: 15px; font-weight: 600; color: #d8dce3; margin-bottom: 8px; }
+  .pitfall-card p { font-size: 13px; color: var(--text2); line-height: 1.6; }
+  .pitfall-card pre {
+    margin-top: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text);
+    overflow-x: auto;
+    line-height: 1.6;
+  }
+  .pitfall-card pre .ko { color: var(--red); }
+  .pitfall-card pre .ok { color: var(--green); }
+
+  /* ── Decision table ── */
+  .dec-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .dec-table th {
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text2);
+    border-bottom: 2px solid var(--border);
+  }
+  .dec-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .dec-table td:first-child { font-weight: 600; color: #d8dce3; white-space: nowrap; }
+  .dec-table td:nth-child(2) { color: var(--accent); font-family: var(--font-mono); font-size: 13px; }
+  .dec-table td:last-child { color: var(--text2); font-size: 13px; }
+
+  /* ── Problem / Solution grid ── */
+  .ps-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 700px) { .ps-grid { grid-template-columns: 1fr; } }
+  .ps-card {
+    border-radius: 12px;
+    padding: 32px;
+  }
+  .ps-card.bad {
+    background: rgba(224,85,106,0.06);
+    border: 1px solid rgba(224,85,106,0.18);
+  }
+  .ps-card.good {
+    background: rgba(77,184,122,0.06);
+    border: 1px solid rgba(77,184,122,0.18);
+  }
+  .ps-card .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 16px;
+  }
+  .ps-card.bad .tag { background: rgba(224,85,106,0.15); color: var(--red); }
+  .ps-card.good .tag { background: rgba(77,184,122,0.15); color: var(--green); }
+  .ps-card h4 { font-size: 17px; font-weight: 600; color: #d8dce3; margin-bottom: 12px; }
+  .ps-card p { font-size: 14px; color: var(--text2); line-height: 1.7; }
+
+  /* ── Workflow timeline ── */
+  .workflow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 48px;
+    flex-wrap: wrap;
+  }
+  .wf-step {
+    flex: 1;
+    min-width: 120px;
+    text-align: center;
+    position: relative;
+    padding: 24px 16px;
+  }
+  .wf-step .icon {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin: 0 auto 12px;
+  }
+  .wf-step .icon.c1 { background: rgba(91,141,239,0.12); }
+  .wf-step .icon.c2 { background: rgba(144,117,230,0.12); }
+  .wf-step .icon.c3 { background: rgba(240,160,96,0.12); }
+  .wf-step .icon.c4 { background: rgba(77,184,122,0.12); }
+  .wf-step .icon.c5 { background: rgba(91,141,239,0.12); }
+  .wf-step .label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #d8dce3;
+    margin-bottom: 4px;
+  }
+  .wf-step .sub {
+    font-size: 11px;
+    color: var(--text2);
+    line-height: 1.4;
+  }
+  .wf-arrow {
+    font-size: 18px;
+    color: var(--text2);
+    flex-shrink: 0;
+    padding: 0 4px;
+  }
+  @media (max-width: 700px) {
+    .workflow { flex-direction: column; }
+    .wf-arrow { transform: rotate(90deg); }
+  }
+
+  /* ── Quote / callout ── */
+  .callout {
+    border-left: 3px solid var(--accent);
+    padding: 20px 24px;
+    margin: 32px 0;
+    background: rgba(91,141,239,0.04);
+    border-radius: 0 8px 8px 0;
+    font-size: 15px;
+    color: var(--text);
+    line-height: 1.7;
+    font-style: italic;
+  }
+  .callout .attr {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text2);
+    font-style: normal;
+  }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center;
+    padding: 48px 0;
+    font-size: 13px;
+    color: var(--text2);
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ Hero ═══ -->
+<header class="hero">
+  <div class="badge">Figma Plugin</div>
+  <h1>HTML <span>→</span> Figma</h1>
+  <p>以 HTML 为桥梁，将 AI 生成的网页无缝导入 Figma，打通从 PRD 到设计稿的完整工作流。</p>
+  <div class="meta">
+    <span><span class="dot blue"></span> 绝对定位还原</span>
+    <span><span class="dot green"></span> 本地文件导入</span>
+    <span>基于 BuilderIO/html-to-figma</span>
+  </div>
+</header>
+
+<!-- ═══ Motivation ═══ -->
+<section>
+  <div class="container">
+    <div class="section-label">Why This Exists</div>
+    <h2>动机：为什么需要这个插件？</h2>
+
+    <div class="ps-grid">
+      <div class="ps-card bad">
+        <span class="tag">Without the plugin</span>
+        <h4>AI 生成网页 → 设计师束手无策</h4>
+        <p>
+          AI 生成网页的能力已经非常成熟——Claude、ChatGPT、Gemini 都能产出结构良好的 HTML/CSS。
+          但设计师拿到这些网页后，无法进行二次设计：改布局、调间距、换颜色、加动效，
+          这些本该在 Figma 里自由完成的动作全部被锁死在代码里。
+        </p>
+      </div>
+      <div class="ps-card good">
+        <span class="tag">With the plugin</span>
+        <h4>AI 生成网页 → HTML 导入 Figma → 自由创作</h4>
+        <p>
+          HTML 作为中间件，把 AI 的生成能力和设计师的工作流无缝连接。
+          AI 产出高质量的可视化，插件将其转换为 Figma 图层，设计师在熟悉的工具里接手，
+          像编辑任何设计稿一样自由修改每一个像素。
+        </p>
+      </div>
+    </div>
+
+    <h3>Figma 原生方案的问题</h3>
+    <p class="text">
+      Figma 提供了官方的 MCP 和 Plugin API，但在实际使用中体验很差：
+      不允许动态创建组件、无法修改 component properties、复杂的 auto-layout 操作受限。
+      更致命的是，让 AI 直接操作 Figma API 创建设计稿，AI 难以理解空间关系、图层嵌套和约束系统，
+      出了错根本不知道是 AI 的问题还是 API 的问题。
+    </p>
+    <p class="text">
+      而 HTML/CSS 是 AI 真正擅长的「图形化语言」——表达能力强，生成质量稳定，可以直接在浏览器里预览。
+      <strong>用 HTML 作为桥梁，比让 AI 直接学 Figma API 要可靠得多。</strong>
+    </p>
+  </div>
+</section>
+
+<!-- ═══ Use Case: PRD Workflow ═══ -->
+<section>
+  <div class="container">
+    <div class="section-label">Real-world Use Case</div>
+    <h2>实际使用场景：PRD → HTML → Figma</h2>
+
+    <h3>问题：设计师如何在长篇 PRD 中不迷路？</h3>
+    <p class="text">
+      工作中拿到一份产品的 PRD，几十页的文档里混杂了给开发看的技术约束、给测试看的验收标准、
+      给运营看的 KPI 指标，以及真正给设计师看的交互逻辑、页面结构和信息层级。
+      设计师要在长篇文字描述中找到自己需要的内容，很容易信息过载。
+    </p>
+    <p class="text">
+      AI 确实可以帮助从 PRD 中提取和筛选重点。但一旦描述复杂化——多状态、多分支、
+      嵌套的逻辑关系——纯文本的交付件无法让设计师快速理解信息架构。
+    </p>
+
+    <div class="callout">
+      "Markdown 不是给人类确认的合适交付件。真正需要人类确认的环节，还是需要图形化。"
+      <div class="attr">— Andrej Karpathy 的观点</div>
+    </div>
+
+    <h3>AI 最擅长的图形化语言就是 HTML</h3>
+    <p class="text">
+      把 PRD 交给 AI 转换为 HTML 后，信息层级、模块关系、优先级差异一目了然：
+      用颜色区分重点与非重点，用卡片组织模块关系，用间距表达信息层级，用排版建立阅读节奏。
+      例如 Batch Reward 的 PRD，经过 AI 转换成 HTML 之后，设计师一眼就能看到需要做什么，
+      不再需要在文字中苦苦寻找设计线索。
+    </p>
+
+    <h3>完整工作流</h3>
+    <div class="workflow">
+      <div class="wf-step">
+        <div class="icon c1">📋</div>
+        <div class="label">PRD 文档</div>
+        <div class="sub">产品需求文档<br>长篇文字描述</div>
+      </div>
+      <div class="wf-arrow">→</div>
+      <div class="wf-step">
+        <div class="icon c2">🤖</div>
+        <div class="label">AI 提取 & 结构化</div>
+        <div class="sub">筛选重点、建立<br>信息层级关系</div>
+      </div>
+      <div class="wf-arrow">→</div>
+      <div class="wf-step">
+        <div class="icon c3">🌐</div>
+        <div class="label">HTML 可视化</div>
+        <div class="sub">卡片、间距、颜色<br>图形化表达信息</div>
+      </div>
+      <div class="wf-arrow">→</div>
+      <div class="wf-step">
+        <div class="icon c4">▣</div>
+        <div class="label">本插件导入 Figma</div>
+        <div class="sub">HTML 转 Figma 图层<br>保持像素级还原</div>
+      </div>
+      <div class="wf-arrow">→</div>
+      <div class="wf-step">
+        <div class="icon c5">🎨</div>
+        <div class="label">设计师自由创作</div>
+        <div class="sub">在熟悉的工具里<br>修改每一个细节</div>
+      </div>
+    </div>
+
+    <p class="text">
+      这就是整个流程的闭环：<strong>PRD 文档 → AI 提取/结构化 → HTML 可视化 → 本插件导入 Figma → 设计师自由创作。</strong>
+      HTML 导入 Figma 是这最后一环，也是打通 AI 和设计师工作流的关键。
+    </p>
+  </div>
+</section>
+
+<!-- ═══ Pipeline ═══ -->
+<section>
+  <div class="container">
+    <div class="section-label">Architecture</div>
+    <h2>管道架构</h2>
+
+    <div class="pipeline-cards">
+      <div class="pipe-card">
+        <div class="step">Step 1</div>
+        <div class="title">HTML 输入</div>
+        <div class="desc">用户拖入本地 HTML 文件，插件在隐藏 iframe 中渲染页面内容</div>
+      </div>
+      <div class="pipe-card">
+        <div class="step">Step 2</div>
+        <div class="title">DOM 提取</div>
+        <div class="desc">htmlToFigma() 遍历所有可见元素，用 getBoundingClientRect 获取绝对坐标</div>
+      </div>
+      <div class="pipe-card">
+        <div class="step">Step 3</div>
+        <div class="title">图层映射</div>
+        <div class="desc">样式映射为 fills/strokes/effects，生成 LayerNode 数组通过 postMessage 传递</div>
+      </div>
+      <div class="pipe-card">
+        <div class="step">Step 4</div>
+        <div class="title">Figma 渲染</div>
+        <div class="desc">code.ts 调用 figma.createFrame/Rectangle/Text/createNodeFromSvg 创建节点</div>
+      </div>
+    </div>
+
+    <!-- Canvas flow diagram -->
+    <div class="canvas-wrapper">
+      <div class="canvas-toolbar">
+        <span class="title">Pipeline Flow</span>
+        <button id="zoomOutBtn" title="Zoom out">−</button>
+        <button id="zoomInBtn" title="Zoom in">+</button>
+        <button id="resetBtn" title="Reset view">↺</button>
+      </div>
+      <canvas id="pipelineCanvas"></canvas>
+      <div class="canvas-hint">🖱 Drag to pan &nbsp;|&nbsp; Scroll to zoom</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Key Fixes ═══ -->
+<section>
+  <div class="container">
+    <div class="section-label">Core Insight</div>
+    <h2>跨 Frame 的 instanceof 陷阱</h2>
+    <p class="text">
+      这是开发过程中遇到的最隐蔽的坑。HTML 内容在 iframe 中渲染，但提取逻辑从父窗口执行。
+      由于 iframe 和父窗口各自拥有独立的 JavaScript 原型链，所有 <code>instanceof</code> 检查全部失效。
+    </p>
+
+    <table class="cmp-table">
+      <thead>
+        <tr><th>失效写法（iframe 元素）</th><th>跨 Frame 兼容写法</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>el instanceof SVGSVGElement</td><td>el.tagName === 'svg'</td></tr>
+        <tr><td>el instanceof SVGElement</td><td>el.namespaceURI === 'http://www.w3.org/2000/svg'</td></tr>
+        <tr><td>el instanceof HTMLImageElement</td><td>el.tagName === 'IMG'</td></tr>
+        <tr><td>el instanceof HTMLPictureElement</td><td>el.tagName === 'PICTURE'</td></tr>
+        <tr><td>el instanceof HTMLVideoElement</td><td>el.tagName === 'VIDEO'</td></tr>
+        <tr><td>el instanceof HTMLElement</td><td>el.nodeType === 1</td></tr>
+        <tr><td>el instanceof Element</td><td>el.nodeType === 1</td></tr>
+        <tr><td>ref instanceof HTMLElement</td><td>ref.nodeType === 1</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ Pitfalls ═══ -->
+<section>
+  <div class="container">
+    <div class="section-label">Pitfalls</div>
+    <h2>踩坑记录</h2>
+
+    <div class="pitfalls-grid">
+      <div class="pitfall-card">
+        <div class="icon red">⚠</div>
+        <h4>CSP 拦截外部样式表</h4>
+        <p>Figma 插件环境的 CSP 禁止加载外部 CSS。HTML 中的 Google Fonts 链接和 @import 规则需要预先去除。</p>
+        <pre>html.replace(/&lt;link[^&gt;]*href=["']https?:\/\/[^"']*["'][^&gt;]*\/?&gt;/gi, '')</pre>
+      </div>
+
+      <div class="pitfall-card">
+        <div class="icon amber">◈</div>
+        <h4>内联元素的包围盒异常</h4>
+        <p>当 inline 元素包含 block 子元素时，getBoundingClientRect 返回的宽度会偏大。需要计算子元素的聚合包围盒来修正。</p>
+      </div>
+
+      <div class="pitfall-card">
+        <div class="icon amber">◫</div>
+        <h4>非统一边框无法直接映射</h4>
+        <p>CSS 允许四边不同宽度/颜色的边框，但 Figma RECTANGLE 只支持统一边框。需要为每条边单独创建细长的 RECTANGLE 图层。</p>
+      </div>
+
+      <div class="pitfall-card">
+        <div class="icon amber">T</div>
+        <h4>字体渲染差异导致文本溢出</h4>
+        <p>CSS 字体和 Figma 内置字体的渲染结果可能存在差异。创建文本后需要检测溢出并逐步缩小字号（最多缩小 30%）来适配。</p>
+      </div>
+
+      <div class="pitfall-card">
+        <div class="icon red">⊘</div>
+        <h4>iframe 内脚本需隔离</h4>
+        <p>HTML 中内联的 &lt;script&gt; 标签会在 iframe 中执行，可能抛出错误干扰提取流程。预览时替换 script 标签为注释。</p>
+      </div>
+
+      <div class="pitfall-card">
+        <div class="icon amber">F</div>
+        <h4>字体回退链跨平台匹配</h4>
+        <p>HTML 使用 "Inter, -apple-system, sans-serif" 回退链，但 Figma 字体有限。需要遍历回退链并在 Figma 可用字体中找到第一个匹配项。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Design Decisions ═══ -->
+<section>
+  <div class="container">
+    <div class="section-label">Design Decisions</div>
+    <h2>关键设计决策</h2>
+
+    <table class="dec-table">
+      <thead>
+        <tr><th>决策</th><th>选择</th><th>原因</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>坐标体系</td><td>绝对定位 (getBoundingClientRect)</td><td>不重建 CSS 布局，100% 还原视觉效果，避免 flexbox/grid → auto-layout 的阻抗不匹配</td></tr>
+        <tr><td>图层结构</td><td>扁平数组 + 可选树结构 (useFrames)</td><td>快速导入用扁平模式，需要层级关系时启用 makeTree LCA 算法</td></tr>
+        <tr><td>提取位置</td><td>iframe 内渲染，父窗口提取</td><td>隔离 HTML 运行环境，防止污染 Figma 插件 UI 的 DOM</td></tr>
+        <tr><td>跨 Frame 检查</td><td>tagName / nodeType / namespaceURI</td><td>instanceof 在跨 frame 场景下因独立原型链而失效</td></tr>
+        <tr><td>字体策略</td><td>保留原始 CSS font-family 字符串</td><td>解耦提取和渲染阶段，在主线程灵活回退匹配 Figma 可用字体</td></tr>
+        <tr><td>构建工具</td><td>esbuild + 内联脚本</td><td>Figma 插件 UI 必须是自包含单文件，提取逻辑无法引用外部 JS</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    HTML to Figma Plugin · Built on BuilderIO/html-to-figma · 2026
+  </div>
+</footer>
+
+<!-- ═══ Canvas Pipeline Diagram ═══ -->
+<script>
+(function() {
+  const canvas = document.getElementById('pipelineCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // ── View state ──
+  let offsetX = 0, offsetY = 0;
+  let scale = 1;
+  let isDragging = false;
+  let dragStartX = 0, dragStartY = 0;
+  let dragStartOffsetX = 0, dragStartOffsetY = 0;
+
+  // ── Node definitions ──
+  const nodeW = 180, nodeH = 68;
+  const nodes = [
+    { id: 'prd',    label: 'PRD 文档',       sub: '产品需求文档',    x: 30,  y: 190, color: '#5b8def', icon: '📋' },
+    { id: 'ai',     label: 'AI 结构化处理',   sub: '提取 + 可视化',   x: 260, y: 190, color: '#9075e6', icon: '🤖' },
+    { id: 'html',   label: 'HTML 可视化',     sub: 'AI 生成网页',    x: 490, y: 190, color: '#f0a060', icon: '🌐' },
+    { id: 'iframe', label: 'iframe 渲染',     sub: '插件内加载 HTML', x: 490, y: 300, color: '#4db87a', icon: '▣'  },
+    { id: 'extract',label: 'htmlToFigma()',   sub: 'DOM → LayerNode[]', x: 720, y: 300, color: '#e0556a', icon: '↻' },
+    { id: 'post',   label: 'postMessage',     sub: '{ layers } 传输', x: 720, y: 190, color: '#5b8def', icon: '✉'  },
+    { id: 'code',   label: 'code.ts',         sub: 'figma.create*()', x: 950, y: 240, color: '#4db87a', icon: '⚙'  },
+    { id: 'figma',  label: 'Figma 画布',      sub: '设计师自由修改',  x: 950, y: 360, color: '#9075e6', icon: '🎨' },
+  ];
+
+  // ── Connection definitions ──
+  const connections = [
+    { from: 'prd',    to: 'ai',     label: '输入' },
+    { from: 'ai',     to: 'html',   label: '生成' },
+    { from: 'html',   to: 'iframe', label: '加载' },
+    { from: 'iframe', to: 'extract',label: '提取' },
+    { from: 'extract',to: 'post',   label: '输出' },
+    { from: 'post',   to: 'code',   label: '接收' },
+    { from: 'code',   to: 'figma',  label: '创建' },
+  ];
+
+  const nodeMap = {};
+  nodes.forEach(n => { nodeMap[n.id] = n; });
+
+  // ── Colors ──
+  const bgColor    = '#141820';
+  const nodeBg     = '#1a1f2b';
+  const nodeBorder = '#252a35';
+  const textColor  = '#c8ccd4';
+  const textDim    = '#8b909a';
+  const arcColor   = '#3a4050';
+
+  // ── Sizing ──
+  function resize() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = rect.width * dpr;
+    canvas.height = 560 * dpr;
+    canvas.style.width  = rect.width + 'px';
+    canvas.style.height = '560px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  // ── Drawing ──
+  function drawNode(n) {
+    const x = n.x * scale + offsetX;
+    const y = n.y * scale + offsetY;
+    const w = nodeW * scale;
+    const h = nodeH * scale;
+    const r = 10 * scale;
+
+    // Shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 12 * scale;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 4 * scale;
+
+    // Body
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+    ctx.fillStyle = nodeBg;
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+
+    // Border
+    ctx.strokeStyle = nodeBorder;
+    ctx.lineWidth = 1 * scale;
+    ctx.stroke();
+
+    // Left accent bar
+    ctx.beginPath();
+    ctx.moveTo(x + r, y + 6 * scale);
+    ctx.lineTo(x + r, y + h - 6 * scale);
+    ctx.arcTo(x + 3 * scale, y + h - 6 * scale, x + 3 * scale, y + h - 3 * scale, r / 2);
+    ctx.lineTo(x + 3 * scale, y + 6 * scale + 3 * scale);
+    ctx.arcTo(x + 3 * scale, y + 6 * scale, x + r, y + 6 * scale, r / 2);
+    ctx.closePath();
+    ctx.fillStyle = n.color;
+    ctx.fill();
+
+    // Label
+    ctx.font = `${600} ${13 * scale}px -apple-system, system-ui, sans-serif`;
+    ctx.fillStyle = '#d8dce3';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(n.label, x + 18 * scale, y + h * 0.42);
+
+    // Subtitle
+    ctx.font = `${11 * scale}px -apple-system, system-ui, sans-serif`;
+    ctx.fillStyle = textDim;
+    ctx.fillText(n.sub, x + 18 * scale, y + h * 0.68);
+  }
+
+  function drawArrow(from, to, label) {
+    const fx = from.x * scale + offsetX;
+    const fy = from.y * scale + offsetY;
+    const tx = to.x * scale + offsetX;
+    const ty = to.y * scale + offsetY;
+
+    // Determine connection points
+    let sx, sy, ex, ey;
+
+    // From right side of source
+    sx = fx + nodeW * scale;
+    sy = fy + nodeH * scale / 2;
+
+    // To left side of target
+    ex = tx;
+    ey = ty + nodeH * scale / 2;
+
+    // For vertical connections
+    // Same-X vertical connections (up or down)
+    if (from.id === 'html' && to.id === 'iframe' ||
+        from.id === 'code' && to.id === 'figma' ||
+        from.id === 'extract' && to.id === 'post') {
+      if (fy < ty) {
+        // Going down: from bottom of source to top of target
+        sx = fx + nodeW * scale / 2;
+        sy = fy + nodeH * scale;
+        ex = tx + nodeW * scale / 2;
+        ey = ty;
+      } else {
+        // Going up: from top of source to bottom of target
+        sx = fx + nodeW * scale / 2;
+        sy = fy;
+        ex = tx + nodeW * scale / 2;
+        ey = ty + nodeH * scale;
+      }
+    }
+
+    // Bezier curve
+    const dx = Math.abs(ex - sx) * 0.5;
+    const dy = Math.abs(ey - sy) * 0.5;
+    const cp1x = sx + dx;
+    const cp1y = sy;
+    const cp2x = ex - dx;
+    const cp2y = ey;
+
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, ex, ey);
+    ctx.strokeStyle = arcColor;
+    ctx.lineWidth = 1.5 * scale;
+    ctx.stroke();
+
+    // Arrowhead
+    const angle = Math.atan2(ey - cp2y, ex - cp2x);
+    const arrowSize = 6 * scale;
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(
+      ex - arrowSize * Math.cos(angle - Math.PI / 6),
+      ey - arrowSize * Math.sin(angle - Math.PI / 6)
+    );
+    ctx.lineTo(
+      ex - arrowSize * Math.cos(angle + Math.PI / 6),
+      ey - arrowSize * Math.sin(angle + Math.PI / 6)
+    );
+    ctx.closePath();
+    ctx.fillStyle = arcColor;
+    ctx.fill();
+
+    // Label
+    if (label) {
+      const midX = (sx + ex) / 2;
+      const midY = (sy + ey) / 2 - 10 * scale;
+      ctx.font = `${10 * scale}px -apple-system, system-ui, sans-serif`;
+      ctx.fillStyle = textDim;
+      ctx.textAlign = 'center';
+      ctx.fillText(label, midX, midY);
+      ctx.textAlign = 'start';
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
+
+    // Draw connections first (behind nodes)
+    connections.forEach(c => {
+      drawArrow(nodeMap[c.from], nodeMap[c.to], c.label);
+    });
+
+    // Draw nodes
+    nodes.forEach(n => drawNode(n));
+  }
+
+  // ── Interaction ──
+  canvas.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    dragStartOffsetX = offsetX;
+    dragStartOffsetY = offsetY;
+    canvas.style.cursor = 'grabbing';
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    offsetX = dragStartOffsetX + (e.clientX - dragStartX);
+    offsetY = dragStartOffsetY + (e.clientY - dragStartY);
+    draw();
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+    canvas.style.cursor = 'grab';
+  });
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+    const newScale = Math.min(Math.max(scale * factor, 0.3), 2.5);
+
+    // Zoom toward cursor
+    offsetX = mx - (mx - offsetX) * (newScale / scale);
+    offsetY = my - (my - offsetY) * (newScale / scale);
+    scale = newScale;
+    draw();
+  });
+
+  // ── Toolbar buttons ──
+  document.getElementById('zoomInBtn').addEventListener('click', () => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = rect.width / 2, my = rect.height / 2;
+    const newScale = Math.min(scale * 1.2, 2.5);
+    offsetX = mx - (mx - offsetX) * (newScale / scale);
+    offsetY = my - (my - offsetY) * (newScale / scale);
+    scale = newScale;
+    draw();
+  });
+
+  document.getElementById('zoomOutBtn').addEventListener('click', () => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = rect.width / 2, my = rect.height / 2;
+    const newScale = Math.max(scale / 1.2, 0.3);
+    offsetX = mx - (mx - offsetX) * (newScale / scale);
+    offsetY = my - (my - offsetY) * (newScale / scale);
+    scale = newScale;
+    draw();
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    scale = 1;
+    offsetX = 0;
+    offsetY = 0;
+    draw();
+  });
+
+  // ── Init ──
+  resize();
+  draw();
+})();
+</script>
+
+</body>
+</html>

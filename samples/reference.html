@@ -1,0 +1,2304 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数学化知识图谱 · graphify 对比 · 增量可控方案</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* ============================================
+           Design System Tokens
+           ============================================ */
+        :root {
+            /* Colors */
+            --color-bg: #f7f5f0;
+            --color-bg-alt: #efede8;
+            --color-surface: #ffffff;
+            --color-surface-hover: #fafaf9;
+            --color-text: #1c1917;
+            --color-text-secondary: #78716c;
+            --color-text-tertiary: #a8a29e;
+            --color-accent: #b45309;
+            --color-accent-light: #fef3c7;
+            --color-accent-mid: #fbbf24;
+            --color-blue: #1e40af;
+            --color-blue-light: #dbeafe;
+            --color-blue-bg: #eff6ff;
+            --color-green: #065f46;
+            --color-green-light: #d1fae5;
+            --color-green-bg: #ecfdf5;
+            --color-border: #e7e5e4;
+            --color-border-light: #f0efed;
+            --color-code-bg: #1c1917;
+            --color-code-text: #e7e5e4;
+            --color-tag-bg: #efede8;
+
+            /* Typography */
+            --font-heading: 'Noto Serif SC', 'Georgia', 'Times New Roman', serif;
+            --font-body: 'Noto Sans SC', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', sans-serif;
+            --font-code: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Menlo', monospace;
+
+            /* Spacing (8px base) */
+            --space-1: 0.25rem;
+            --space-2: 0.5rem;
+            --space-3: 0.75rem;
+            --space-4: 1rem;
+            --space-5: 1.25rem;
+            --space-6: 1.5rem;
+            --space-8: 2rem;
+            --space-10: 2.5rem;
+            --space-12: 3rem;
+            --space-16: 4rem;
+            --space-20: 5rem;
+            --space-24: 6rem;
+
+            /* Radii */
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 24px;
+            --radius-xl: 32px;
+
+            /* Shadows */
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+            --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+            --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.06);
+            --shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.08);
+
+            /* Transitions */
+            --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+            /* Layout */
+            --sidebar-width: 72px;
+            --content-max-width: 840px;
+        }
+
+        /* ============================================
+           Dark Theme
+           ============================================ */
+        [data-theme="dark"] {
+            --color-bg: #0c0a09;
+            --color-bg-alt: #1c1917;
+            --color-surface: #1c1917;
+            --color-surface-hover: #292524;
+            --color-text: #e7e5e4;
+            --color-text-secondary: #a8a29e;
+            --color-text-tertiary: #78716c;
+            --color-accent: #f59e0b;
+            --color-accent-light: #451a03;
+            --color-accent-mid: #b45309;
+            --color-blue: #60a5fa;
+            --color-blue-light: #1e3a5f;
+            --color-blue-bg: #0f1d2f;
+            --color-green: #34d399;
+            --color-green-light: #064e3b;
+            --color-green-bg: #022c22;
+            --color-border: #44403c;
+            --color-border-light: #292524;
+            --color-code-bg: #000000;
+            --color-code-text: #d6d3d1;
+            --color-tag-bg: #292524;
+        }
+
+        /* ============================================
+           Reset & Base
+           ============================================ */
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+            scroll-padding-top: 2rem;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--color-bg);
+            color: var(--color-text);
+            line-height: 1.75;
+            font-size: 16px;
+            text-wrap: pretty;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            transition: background var(--transition-slow), color var(--transition-slow);
+        }
+
+        /* ============================================
+           Progress Sidebar
+           ============================================ */
+        .progress-sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            height: 100vh;
+            width: var(--sidebar-width);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-2);
+            z-index: 50;
+            background: transparent;
+            transition: opacity var(--transition-base);
+        }
+
+        .progress-sidebar .line {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 1px;
+            height: 100%;
+            background: var(--color-border);
+            transform: translateX(-50%);
+            z-index: -1;
+        }
+
+        .progress-sidebar .line-fill {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 2px;
+            background: var(--color-accent);
+            transform: translateX(-50%);
+            z-index: -1;
+            transition: height var(--transition-base);
+            height: 0%;
+        }
+
+        .progress-dot {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-body);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--color-text-tertiary);
+            border: 1.5px solid var(--color-border);
+            background: var(--color-bg);
+            cursor: pointer;
+            transition: all var(--transition-base);
+            text-decoration: none;
+            position: relative;
+        }
+
+        .progress-dot:hover {
+            border-color: var(--color-accent);
+            color: var(--color-accent);
+        }
+
+        .progress-dot.active {
+            border-color: var(--color-accent);
+            background: var(--color-accent);
+            color: #ffffff;
+            transform: scale(1.1);
+            box-shadow: 0 0 0 4px var(--color-accent-light);
+        }
+
+        .progress-dot .label {
+            position: absolute;
+            left: calc(100% + 12px);
+            white-space: nowrap;
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: var(--color-text-secondary);
+            opacity: 0;
+            transform: translateX(-4px);
+            transition: all var(--transition-base);
+            pointer-events: none;
+        }
+
+        .progress-dot.active .label {
+            opacity: 1;
+            transform: translateX(0);
+            color: var(--color-accent);
+        }
+
+        /* ============================================
+           Main Layout
+           ============================================ */
+        .page {
+            max-width: var(--content-max-width);
+            margin: 0 auto;
+            padding: var(--space-12) var(--space-8) var(--space-16);
+            padding-left: calc(var(--sidebar-width) + var(--space-8));
+            min-height: 100vh;
+        }
+
+        /* ============================================
+           Hero Section
+           ============================================ */
+        .hero {
+            margin-bottom: var(--space-16);
+            padding-top: var(--space-12);
+        }
+
+        .hero .eyebrow {
+            font-family: var(--font-body);
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--color-accent);
+            margin-bottom: var(--space-4);
+        }
+
+        .hero h1 {
+            font-family: var(--font-heading);
+            font-size: clamp(2rem, 4vw, 3.2rem);
+            font-weight: 900;
+            line-height: 1.2;
+            letter-spacing: -0.02em;
+            color: var(--color-text);
+            margin-bottom: var(--space-4);
+        }
+
+        .hero .subtitle {
+            font-size: 1.05rem;
+            color: var(--color-text-secondary);
+            max-width: 640px;
+            line-height: 1.7;
+        }
+
+        .hero .meta {
+            display: flex;
+            gap: var(--space-6);
+            margin-top: var(--space-6);
+            font-size: 0.8rem;
+            color: var(--color-text-tertiary);
+        }
+
+        .hero .meta span {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+        }
+
+        /* ============================================
+           Section Styles
+           ============================================ */
+        section {
+            margin-bottom: var(--space-16);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+        }
+
+        section.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .section-header {
+            display: flex;
+            align-items: flex-start;
+            gap: var(--space-4);
+            margin-bottom: var(--space-6);
+            padding-bottom: var(--space-4);
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .section-number {
+            flex-shrink: 0;
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-heading);
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: #ffffff;
+        }
+
+        .section-number.accent-bg { background: var(--color-accent); }
+        .section-number.blue-bg { background: var(--color-blue); }
+        .section-number.green-bg { background: var(--color-green); }
+
+        .section-title {
+            font-family: var(--font-heading);
+            font-size: 1.65rem;
+            font-weight: 700;
+            line-height: 1.3;
+            color: var(--color-text);
+            padding-top: 0.1rem;
+        }
+
+        .section-desc {
+            font-size: 0.95rem;
+            color: var(--color-text-secondary);
+            margin-bottom: var(--space-6);
+            line-height: 1.7;
+        }
+
+        .section-desc strong {
+            color: var(--color-text);
+            font-weight: 600;
+        }
+
+        /* ============================================
+           Card (replacing old left-border cards)
+           ============================================ */
+        .card {
+            background: var(--color-surface);
+            border-radius: var(--radius-lg);
+            padding: var(--space-8);
+            margin-bottom: var(--space-6);
+            border: 1px solid var(--color-border);
+            transition: all var(--transition-base);
+        }
+
+        .card:hover {
+            background: var(--color-surface-hover);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+            border-color: var(--color-accent-mid);
+        }
+
+        .card .card-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--color-text-tertiary);
+            margin-bottom: var(--space-3);
+        }
+
+        .card p {
+            font-size: 0.95rem;
+            color: var(--color-text-secondary);
+            line-height: 1.75;
+        }
+
+        .card p strong {
+            color: var(--color-text);
+            font-weight: 600;
+        }
+
+        .card p + p {
+            margin-top: var(--space-4);
+        }
+
+        /* ============================================
+           Diagram / Flow
+           ============================================ */
+        .flow-diagram {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-3);
+            padding: var(--space-6);
+            background: var(--color-bg-alt);
+            border-radius: var(--radius-md);
+            margin: var(--space-6) 0;
+        }
+
+        .flow-node {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            padding: var(--space-3) var(--space-5);
+            text-align: center;
+            min-width: 110px;
+            transition: all var(--transition-base);
+        }
+
+        .flow-node:hover {
+            border-color: var(--color-accent-mid);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .flow-node .node-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--color-text);
+        }
+
+        .flow-node .node-sub {
+            font-size: 0.7rem;
+            color: var(--color-text-tertiary);
+            margin-top: var(--space-1);
+        }
+
+        .flow-node.highlight-blue {
+            background: var(--color-blue-bg);
+            border-color: var(--color-blue);
+        }
+
+        .flow-node.highlight-blue .node-title { color: var(--color-blue); }
+
+        .flow-node.highlight-green {
+            background: var(--color-green-bg);
+            border-color: var(--color-green);
+        }
+
+        .flow-node.highlight-green .node-title { color: var(--color-green); }
+
+        .flow-node.highlight-accent {
+            background: var(--color-accent-light);
+            border-color: var(--color-accent);
+        }
+
+        .flow-node.highlight-accent .node-title { color: var(--color-accent); }
+
+        .flow-arrow {
+            font-size: 1.3rem;
+            color: var(--color-text-tertiary);
+            font-weight: 300;
+            flex-shrink: 0;
+        }
+
+        .flow-arrow-svg {
+            flex-shrink: 0;
+            color: var(--color-text-tertiary);
+        }
+
+        /* ============================================
+           Comparison Table
+           ============================================ */
+        .comparison-wrap {
+            overflow-x: auto;
+            margin: var(--space-6) 0;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--color-border);
+        }
+
+        .comp-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .comp-table th {
+            background: var(--color-bg-alt);
+            font-weight: 700;
+            font-size: 0.7rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--color-text-secondary);
+            padding: var(--space-4) var(--space-5);
+            text-align: left;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .comp-table td {
+            padding: var(--space-4) var(--space-5);
+            border-bottom: 1px solid var(--color-border-light);
+            vertical-align: top;
+            color: var(--color-text-secondary);
+        }
+
+        .comp-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .comp-table .dimension {
+            font-weight: 600;
+            color: var(--color-text);
+            white-space: nowrap;
+            width: 100px;
+        }
+
+        .comp-table .cell-them {
+            background: var(--color-bg-alt);
+        }
+
+        .comp-table .cell-us {
+            background: var(--color-blue-bg);
+        }
+
+        .comp-table .cell-us strong {
+            color: var(--color-blue);
+        }
+
+        .comp-table tr:hover td {
+            background: var(--color-surface-hover);
+        }
+
+        .comp-table tr:hover .cell-us {
+            background: var(--color-blue-bg);
+        }
+
+        .comp-table tr:hover .cell-them {
+            background: var(--color-bg-alt);
+        }
+
+        /* ============================================
+           Flow Steps (Step 4)
+           ============================================ */
+        .flow-steps {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-2);
+            margin: var(--space-6) 0;
+        }
+
+        .flow-step {
+            background: var(--color-surface);
+            border: 1.5px solid var(--color-border);
+            border-radius: var(--radius-md);
+            padding: var(--space-3) var(--space-5);
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: var(--color-text);
+            transition: all var(--transition-base);
+            text-align: center;
+        }
+
+        .flow-step:hover {
+            border-color: var(--color-accent-mid);
+        }
+
+        .flow-step .step-sub {
+            font-weight: 400;
+            font-size: 0.75rem;
+            color: var(--color-text-tertiary);
+            margin-top: var(--space-1);
+        }
+
+        .flow-step.highlight-blue {
+            border-color: var(--color-blue);
+            background: var(--color-blue-bg);
+        }
+
+        .flow-step.highlight-blue .step-sub { color: var(--color-blue); }
+
+        .flow-step.highlight-green {
+            border-color: var(--color-green);
+            background: var(--color-green-bg);
+        }
+
+        .flow-step.highlight-green .step-sub { color: var(--color-green); }
+
+        .flow-step.highlight-accent {
+            border-color: var(--color-accent);
+            background: var(--color-accent-light);
+        }
+
+        .flow-step.highlight-accent .step-sub { color: var(--color-accent); }
+
+        .flow-arrow-short {
+            font-size: 1.1rem;
+            color: var(--color-text-tertiary);
+        }
+
+        /* ============================================
+           Details / Collapsible
+           ============================================ */
+        details.expandable {
+            margin-top: var(--space-6);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--color-border);
+            overflow: hidden;
+            transition: border-color var(--transition-base);
+        }
+
+        details.expandable[open] {
+            border-color: var(--color-accent-mid);
+        }
+
+        details.expandable summary {
+            padding: var(--space-4) var(--space-6);
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            color: var(--color-text);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            background: var(--color-bg-alt);
+            user-select: none;
+            transition: background var(--transition-fast);
+        }
+
+        details.expandable summary:hover {
+            background: var(--color-border);
+        }
+
+        details.expandable summary::-webkit-details-marker {
+            display: none;
+        }
+
+        details.expandable summary .toggle-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: transform var(--transition-base);
+            color: var(--color-accent);
+        }
+
+        details.expandable[open] summary .toggle-icon {
+            transform: rotate(90deg);
+        }
+
+        details.expandable .details-content {
+            padding: var(--space-6);
+            border-top: 1px solid var(--color-border);
+        }
+
+        details.expandable .details-content > p {
+            font-size: 0.9rem;
+            color: var(--color-text-secondary);
+            line-height: 1.75;
+            margin-bottom: var(--space-4);
+        }
+
+        details.expandable .details-content > p:last-child {
+            margin-bottom: 0;
+        }
+
+        .tag-label {
+            display: inline-block;
+            background: var(--color-tag-bg);
+            color: var(--color-text);
+            border-radius: var(--radius-sm);
+            padding: 0.15rem 0.6rem;
+            font-weight: 600;
+            font-size: 0.7rem;
+            letter-spacing: 0.03em;
+            margin-right: var(--space-1);
+        }
+
+        .tag-label.accent-tag {
+            background: var(--color-accent-light);
+            color: var(--color-accent);
+        }
+
+        .tag-label.blue-tag {
+            background: var(--color-blue-light);
+            color: var(--color-blue);
+        }
+
+        .tag-label.green-tag {
+            background: var(--color-green-light);
+            color: var(--color-green);
+        }
+
+        /* ============================================
+           Code Blocks
+           ============================================ */
+        pre {
+            background: var(--color-code-bg);
+            color: var(--color-code-text);
+            padding: var(--space-5);
+            border-radius: var(--radius-md);
+            overflow-x: auto;
+            font-family: var(--font-code);
+            font-size: 0.8rem;
+            line-height: 1.6;
+            margin: var(--space-4) 0;
+            tab-size: 4;
+        }
+
+        pre code {
+            font-family: inherit;
+        }
+
+        code {
+            font-family: var(--font-code);
+            font-size: 0.8em;
+            background: var(--color-tag-bg);
+            padding: 0.1em 0.3em;
+            border-radius: 4px;
+            color: var(--color-text);
+        }
+
+        pre code {
+            background: transparent;
+            padding: 0;
+            border-radius: 0;
+            color: inherit;
+        }
+
+        /* ============================================
+           Badge row
+           ============================================ */
+        .badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-2);
+            margin: var(--space-5) 0;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1);
+            background: var(--color-tag-bg);
+            color: var(--color-text-secondary);
+            border-radius: 999px;
+            padding: 0.3rem 0.9rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge.accent-badge {
+            background: var(--color-accent);
+            color: #ffffff;
+        }
+
+        .badge.blue-badge {
+            background: var(--color-blue);
+            color: #ffffff;
+        }
+
+        .badge.green-badge {
+            background: var(--color-green);
+            color: #ffffff;
+        }
+
+        /* ============================================
+           Multi-column
+           ============================================ */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--space-5);
+            margin: var(--space-4) 0;
+        }
+
+        @media (max-width: 700px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .info-box {
+            background: var(--color-bg-alt);
+            border-radius: var(--radius-md);
+            padding: var(--space-5);
+        }
+
+        .info-box strong {
+            display: block;
+            font-size: 0.9rem;
+            color: var(--color-text);
+            margin-bottom: var(--space-2);
+        }
+
+        .info-box p {
+            font-size: 0.85rem;
+            color: var(--color-text-secondary);
+            line-height: 1.7;
+        }
+
+        .info-box.accent-box {
+            background: var(--color-accent-light);
+        }
+
+        .info-box.blue-box {
+            background: var(--color-blue-bg);
+        }
+
+        .info-box.green-box {
+            background: var(--color-green-bg);
+        }
+
+        /* ============================================
+           Divider
+           ============================================ */
+        .divider {
+            border: 0;
+            border-top: 1px dashed var(--color-border);
+            margin: var(--space-8) 0;
+        }
+
+        /* ============================================
+           Footer
+           ============================================ */
+        .page-footer {
+            text-align: center;
+            padding: var(--space-8) 0;
+            color: var(--color-text-tertiary);
+            font-size: 0.8rem;
+            border-top: 1px solid var(--color-border);
+        }
+
+        /* ============================================
+           Canvas Flow Container (Section 2) — Pan/Zoom Viewport
+           ============================================ */
+        .canvas-flow-container {
+            width: 100%;
+            margin: var(--space-4) 0;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            position: relative;
+            background: var(--color-bg-alt);
+            user-select: none;
+            -webkit-user-select: none;
+            cursor: grab;
+        }
+
+        .canvas-flow-container.grabbing {
+            cursor: grabbing;
+        }
+
+        .canvas-flow-container canvas {
+            display: block;
+            width: 100%;
+            height: 360px;
+        }
+
+        .canvas-zoom-controls {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 4px;
+            box-shadow: var(--shadow-sm);
+            z-index: 10;
+            opacity: 0.7;
+            transition: opacity var(--transition-fast);
+        }
+
+        .canvas-zoom-controls:hover {
+            opacity: 1;
+        }
+
+        .canvas-zoom-controls button {
+            width: 32px;
+            height: 32px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--color-text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: var(--font-body);
+            transition: all var(--transition-fast);
+        }
+
+        .canvas-zoom-controls button:hover {
+            background: var(--color-bg-alt);
+            color: var(--color-text);
+        }
+
+        .canvas-zoom-controls .zoom-level {
+            font-size: 11px;
+            font-weight: 500;
+            font-family: var(--font-body);
+            color: var(--color-text-tertiary);
+            min-width: 32px;
+            text-align: center;
+        }
+
+        .canvas-zoom-controls .sep {
+            width: 1px;
+            height: 20px;
+            background: var(--color-border);
+        }
+
+        @media (max-width: 600px) {
+            .canvas-flow-container canvas {
+                height: 320px;
+            }
+        }
+
+        @media (max-width: 450px) {
+            .canvas-flow-container canvas {
+                height: 360px;
+            }
+        }
+
+        /* ============================================
+           Inline SVG icon helper
+           ============================================ */
+        .icon-svg {
+            width: 1em;
+            height: 1em;
+            display: inline-block;
+            vertical-align: middle;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .icon-svg.lg {
+            width: 1.4em;
+            height: 1.4em;
+        }
+
+        /* ============================================
+           Section summary / result callout
+           ============================================ */
+        .result-callout {
+            text-align: center;
+            padding: var(--space-5) var(--space-6);
+            background: var(--color-green-bg);
+            border: 1px solid var(--color-green-light);
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            color: var(--color-green);
+            font-weight: 600;
+            margin-top: var(--space-6);
+        }
+
+        .result-callout .badge.green-badge {
+            position: relative;
+            top: -1px;
+            margin-right: var(--space-2);
+        }
+
+        /* ============================================
+           Tweaks Panel
+           ============================================ */
+        .tweaks-toggle {
+            position: fixed;
+            bottom: var(--space-6);
+            right: var(--space-6);
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 100;
+            color: var(--color-text-secondary);
+            transition: all var(--transition-base);
+        }
+
+        .tweaks-toggle:hover {
+            border-color: var(--color-accent);
+            color: var(--color-accent);
+            transform: scale(1.05);
+        }
+
+        .tweaks-panel {
+            position: fixed;
+            bottom: calc(var(--space-6) + 52px);
+            right: var(--space-6);
+            width: 240px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-xl);
+            padding: var(--space-5);
+            z-index: 99;
+            transform: translateY(12px);
+            opacity: 0;
+            pointer-events: none;
+            transition: all var(--transition-base);
+        }
+
+        .tweaks-panel.open {
+            transform: translateY(0);
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .tweaks-panel h4 {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-text-tertiary);
+            margin-bottom: var(--space-4);
+        }
+
+        .tweak-group {
+            margin-bottom: var(--space-4);
+        }
+
+        .tweak-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .tweak-group label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--color-text);
+            margin-bottom: var(--space-2);
+        }
+
+        .tweak-group .tweak-options {
+            display: flex;
+            gap: var(--space-1);
+        }
+
+        .tweak-group .tweak-options button {
+            flex: 1;
+            padding: var(--space-1) var(--space-2);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm);
+            background: var(--color-bg);
+            color: var(--color-text-secondary);
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .tweak-group .tweak-options button:hover {
+            border-color: var(--color-accent-mid);
+        }
+
+        .tweak-group .tweak-options button.active {
+            background: var(--color-accent);
+            border-color: var(--color-accent);
+            color: #ffffff;
+        }
+
+        /* ============================================
+           Responsive
+           ============================================ */
+        @media (max-width: 800px) {
+            .progress-sidebar {
+                display: none;
+            }
+
+            .page {
+                padding: var(--space-8) var(--space-5);
+            }
+
+            .page {
+                padding-left: var(--space-5);
+            }
+
+            .hero h1 {
+                font-size: 1.75rem;
+            }
+
+            .section-title {
+                font-size: 1.3rem;
+            }
+
+            .card {
+                padding: var(--space-5);
+            }
+
+            .flow-diagram {
+                padding: var(--space-4);
+                gap: var(--space-2);
+            }
+
+            .flow-node {
+                min-width: 80px;
+                padding: var(--space-2) var(--space-3);
+            }
+
+            .flow-node .node-title {
+                font-size: 0.8rem;
+            }
+
+            .tweaks-panel {
+                right: var(--space-4);
+                left: var(--space-4);
+                width: auto;
+            }
+        }
+
+        @media (max-width: 500px) {
+            .hero h1 {
+                font-size: 1.5rem;
+            }
+
+            .hero .meta {
+                flex-direction: column;
+                gap: var(--space-2);
+            }
+
+            .comp-table {
+                font-size: 0.75rem;
+            }
+
+            .comp-table th,
+            .comp-table td {
+                padding: var(--space-3);
+            }
+        }
+
+        /* ============================================
+           Accessibility
+           ============================================ */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.01ms !important;
+            }
+
+            section {
+                opacity: 1 !important;
+                transform: none !important;
+            }
+        }
+
+        @media print {
+            .progress-sidebar,
+            .tweaks-toggle,
+            .tweaks-panel {
+                display: none !important;
+            }
+
+            .page {
+                padding: 0;
+                max-width: 100%;
+            }
+
+            section {
+                opacity: 1 !important;
+                transform: none !important;
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ============================================
+    Progress Sidebar
+    ============================================ -->
+    <nav class="progress-sidebar" aria-label="Section navigation">
+        <div class="line"></div>
+        <div class="line-fill" id="lineFill"></div>
+        <a class="progress-dot" href="#section-1" data-section="0">
+            01
+            <span class="label">数学化知识图谱</span>
+        </a>
+        <a class="progress-dot" href="#section-2" data-section="1">
+            02
+            <span class="label">graphify 方案</span>
+        </a>
+        <a class="progress-dot" href="#section-3" data-section="2">
+            03
+            <span class="label">差异对比</span>
+        </a>
+        <a class="progress-dot" href="#section-4" data-section="3">
+            04
+            <span class="label">增量可控</span>
+        </a>
+    </nav>
+
+    <!-- ============================================
+    Main Content
+    ============================================ -->
+    <div class="page">
+
+        <!-- Hero -->
+        <header class="hero">
+            <div class="eyebrow">Technical Report</div>
+            <h1>数学化知识图谱<br>graphify 对比 · 增量可控方案</h1>
+            <p class="subtitle">
+                图形化梳理，并展开技术细节与案例 —— 从构想、发现社区方案、对比差异，到最终实现有序增量抽象。
+            </p>
+            <div class="meta">
+                <span>
+                    <svg class="icon-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    阅读时间约 8 分钟
+                </span>
+                <span>
+                    <svg class="icon-svg" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    知识图谱 · 差异分析
+                </span>
+                <span>
+                    <svg class="icon-svg" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    数学化方案 · 增量策略
+                </span>
+            </div>
+        </header>
+
+        <!-- ========== Section 1 ========== -->
+        <section id="section-1" aria-labelledby="s1-title">
+            <div class="section-header">
+                <div class="section-number accent-bg">01</div>
+                <h2 class="section-title" id="s1-title">用数学的方式构建 AI 知识图谱</h2>
+            </div>
+            <p class="section-desc">
+                核心思路：<strong>一次编译，运行时纯数学运算，几乎不消耗 token。</strong> 将代码片段抽象为图、张量或概率模型，推理变成矩阵乘法或信念传播。
+            </p>
+
+            <div class="card">
+                <div class="canvas-flow-container" id="s1Container">
+                    <canvas id="s1Canvas"></canvas>
+                    <div class="canvas-zoom-controls">
+                        <button data-zoom="out" title="缩小">−</button>
+                        <span class="zoom-level" id="zoomLevel1">100%</span>
+                        <button data-zoom="in" title="放大">+</button>
+                        <span class="sep"></span>
+                        <button data-zoom="reset" title="重置">⟲</button>
+                    </div>
+                </div>
+            </div>
+
+            <details class="expandable">
+                <summary>
+                    <span class="toggle-icon">
+                        <svg class="icon-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                    展开技术细节：三大数学路径 + Figma 案例
+                </summary>
+                <div class="details-content">
+                    <p>
+                        <span class="tag-label accent-tag">代数 / 张量</span>
+                        <strong>邻接张量与嵌入</strong>
+                    </p>
+                    <p>
+                        每个三元组 (实体, 关系, 实体) 构成稀疏张量 X。多跳推理 = 链式张量乘积。
+                        TransE 将实体和关系嵌入低维向量，类比推理变成向量加减。
+                    </p>
+                    <div class="flow-diagram" style="justify-content: flex-start;">
+                        <div class="flow-node">
+                            <div class="node-title">createRectangle</div>
+                            <div class="node-sub">实体</div>
+                        </div>
+                        <div class="flow-arrow" style="font-size: 0.9rem; color: var(--color-text-tertiary);">produces</div>
+                        <div class="flow-node">
+                            <div class="node-title">Rectangle</div>
+                            <div class="node-sub">实体</div>
+                        </div>
+                        <span style="margin-left: 1rem; font-family: var(--font-code); font-size: 0.8rem; color: var(--color-text-tertiary);">
+                            X[createRectangle, produces, Rectangle] = 1
+                        </span>
+                    </div>
+
+                    <p>
+                        <span class="tag-label blue-tag">概率图</span>
+                        <strong>马尔可夫逻辑网 / PSL</strong>
+                    </p>
+                    <p>为每条抽取规则赋予权重，构建因子图。查询时运行信念传播或凸优化，得到边缘概率。</p>
+
+                    <p>
+                        <span class="tag-label green-tag">几何 / 拓扑</span>
+                        <strong>双曲嵌入 &amp; 概念格</strong>
+                    </p>
+                    <p>树状层级嵌入庞加莱球，分类 = 测地距离。形式概念分析构建概念格，查询变成上下确界运算。</p>
+
+                    <p><strong>Figma 案例：循环卡片片段的数学抽象</strong></p>
+                    <pre><code>// 原始片段
+const colors = ['#FF0000','#00FF00','#0000FF'];
+for (let i=0; i&lt;colors.length; i++) {
+    const rect = figma.createRectangle();
+    rect.fills = [{type:'SOLID', color: hexToRgb(colors[i])}];
+}</code></pre>
+                    <div class="flow-diagram">
+                        <div class="flow-node">
+                            <div class="node-title">Loop</div>
+                            <div class="node-sub">count=3</div>
+                        </div>
+                        <div class="flow-arrow" style="font-size: 0.85rem; color: var(--color-text-tertiary);">composed_of</div>
+                        <div class="flow-node">
+                            <div class="node-title">createRectangle</div>
+                        </div>
+                        <div class="flow-arrow" style="font-size: 0.85rem; color: var(--color-text-tertiary);">produces</div>
+                        <div class="flow-node">
+                            <div class="node-title">Rectangle</div>
+                        </div>
+                        <div class="flow-arrow" style="font-size: 0.85rem; color: var(--color-text-tertiary);">has</div>
+                        <div class="flow-node">
+                            <div class="node-title">FillColor</div>
+                            <div class="node-sub">参数: 颜色数组</div>
+                        </div>
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--color-text-tertiary);">
+                        编译后的图保留了循环结构、输出类型与可替换的颜色参数。运行时只需替换参数并展开模板。
+                    </p>
+                </div>
+            </details>
+        </section>
+
+        <!-- ========== Section 2 ========== -->
+        <section id="section-2" aria-labelledby="s2-title">
+            <div class="section-header">
+                <div class="section-number blue-bg">02</div>
+                <h2 class="section-title" id="s2-title">社区方案：graphify 是如何工作的？</h2>
+            </div>
+            <p class="section-desc">
+                一个面向 AI 编码助手的技能，对已有目录运行，输出知识图谱报告 —— <strong>事后代码考古</strong>。
+            </p>
+
+            <div class="card">
+                <div class="canvas-flow-container" id="graphifyContainer">
+                    <canvas id="graphifyCanvas"></canvas>
+                    <div class="canvas-zoom-controls">
+                        <button data-zoom="out" title="缩小">−</button>
+                        <span class="zoom-level" id="zoomLevel2">100%</span>
+                        <button data-zoom="in" title="放大">+</button>
+                        <span class="sep"></span>
+                        <button data-zoom="reset" title="重置">⟲</button>
+                    </div>
+                </div>
+
+                <div class="badge-row">
+                    <span class="badge blue-badge">输出</span>
+                    <span class="badge">God nodes · 意外连接 · 建议提问</span>
+                    <span class="badge blue-badge">边标记</span>
+                    <span class="badge">EXTRACTED / INFERRED / AMBIGUOUS</span>
+                    <span class="badge blue-badge">无 embedding</span>
+                    <span class="badge">纯图拓扑聚类</span>
+                </div>
+            </div>
+
+            <details class="expandable">
+                <summary>
+                    <span class="toggle-icon">
+                        <svg class="icon-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                    展开技术细节：两轮提取、关系类型与聚类原理
+                </summary>
+                <div class="details-content">
+                    <p>
+                        <span class="tag-label blue-tag">代码提取</span>
+                        完全确定性，使用 tree-sitter 解析 AST，生成调用图、继承关系、导入依赖。不消耗 LLM token。
+                    </p>
+                    <p>
+                        <span class="tag-label accent-tag">文档 / 图片</span>
+                        并行调用 Claude 子代理，从 Markdown、PDF、截图中抽取概念，建立与代码实体的关联，边标记为 <code>INFERRED</code> 并附带置信度。
+                    </p>
+                    <p>
+                        <span class="tag-label green-tag">Leiden 聚类</span>
+                        基于图拓扑边密度进行社区划分，不依赖 embedding 或向量数据库。语义相似边直接参与聚类，因此概念相近的节点自然聚合。
+                    </p>
+                    <p>
+                        <span class="tag-label blue-tag">关系类型</span>
+                        <code>calls</code>, <code>imports</code>, <code>inherits_from</code>, <code>semantically_similar_to</code>, <code>rationale_for</code> 等，均为描述性关系。
+                    </p>
+
+                    <p><strong>案例：分析 Karpathy 的仓库混合语料</strong></p>
+                    <div class="grid-2">
+                        <div class="info-box accent-box">
+                            <strong>输入</strong>
+                            <p>52 个文件（代码 + 5 篇论文 + 4 张图片）</p>
+                        </div>
+                        <div class="info-box blue-box">
+                            <strong>输出</strong>
+                            <p>
+                                graph.json + GRAPH_REPORT.md<br>
+                                God node: Transformer<br>
+                                意外连接: 论文中的 Attention 与代码中的 attention.py<br>
+                                token 压缩比 <strong>71.5x</strong>
+                            </p>
+                        </div>
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--color-text-tertiary);">
+                        graphify 的价值：跨模态连接 + 高倍压缩 + 结构导航，适合快速理解陌生代码库。
+                    </p>
+                </div>
+            </details>
+        </section>
+
+        <!-- ========== Section 3 ========== -->
+        <section id="section-3" aria-labelledby="s3-title">
+            <div class="section-header">
+                <div class="section-number green-bg">03</div>
+                <h2 class="section-title" id="s3-title">我们的方案 vs graphify —— 关键差异</h2>
+            </div>
+            <p class="section-desc">
+                从目标、处理时机到运行时产出 —— 七个维度的系统对比，揭示两种方案的本质区别。
+            </p>
+
+            <div class="card">
+                <div class="comparison-wrap">
+                    <table class="comp-table">
+                        <thead>
+                            <tr>
+                                <th>维度</th>
+                                <th>graphify</th>
+                                <th>我们的数学化 Figma 代码库</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="dimension">目标</td>
+                                <td class="cell-them">理解已有代码库结构</td>
+                                <td class="cell-us">复用片段，自动组合生成新代码</td>
+                            </tr>
+                            <tr>
+                                <td class="dimension">处理时机</td>
+                                <td class="cell-them">事后（对目录运行）</td>
+                                <td class="cell-us">实时增量编译（对话中）</td>
+                            </tr>
+                            <tr>
+                                <td class="dimension">代码提取</td>
+                                <td class="cell-them">tree-sitter AST 结构</td>
+                                <td class="cell-us"><strong>LLM 语义抽象</strong>（模式+参数化）</td>
+                            </tr>
+                            <tr>
+                                <td class="dimension">核心关系</td>
+                                <td class="cell-them">calls / imports / similar_to</td>
+                                <td class="cell-us"><strong>produces / consumes / variant_of</strong></td>
+                            </tr>
+                            <tr>
+                                <td class="dimension">聚类依据</td>
+                                <td class="cell-them">Leiden 边密度</td>
+                                <td class="cell-us">功能兼容性 + 抽象层次 + 类型匹配</td>
+                            </tr>
+                            <tr>
+                                <td class="dimension">参数化</td>
+                                <td class="cell-them" style="color: var(--color-text-tertiary);">无</td>
+                                <td class="cell-us"><strong>核心能力</strong>（颜色/尺寸/数量变体）</td>
+                            </tr>
+                            <tr>
+                                <td class="dimension">运行时输出</td>
+                                <td class="cell-them">图路径解释、报告</td>
+                                <td class="cell-us"><strong>可执行组合代码</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="badge-row">
+                    <span class="badge green-badge">本质差异</span>
+                    <span class="badge">graphify = 事后理解 · 我们 = 实时合成</span>
+                    <span class="badge green-badge">关系差异</span>
+                    <span class="badge">描述性边 → 操作性接口边</span>
+                </div>
+            </div>
+
+            <details class="expandable">
+                <summary>
+                    <span class="toggle-icon">
+                        <svg class="icon-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                    案例解释：为什么 AST 不够？
+                </summary>
+                <div class="details-content">
+                    <p><strong>两段语义等价的 Figma 代码：</strong></p>
+                    <pre><code>// 写法 A
+rect.fills = [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }];
+
+// 写法 B
+const paint = figma.util.solidPaint(1, 0, 0);
+rect.fills = [paint];</code></pre>
+                    <p>
+                        AST 将这两个视为完全不同的结构（属性赋值 vs 函数调用），但我们需要知道它们都是 <strong>设置红色填充</strong> 这一模式的变体。
+                        LLM 抽象可以识别语义等价，并为其建立 <code>variant_of</code> 边，后续检索时两者都能被命中。
+                    </p>
+                </div>
+            </details>
+        </section>
+
+        <!-- ========== Section 4 ========== -->
+        <section id="section-4" aria-labelledby="s4-title">
+            <div class="section-header">
+                <div class="section-number" style="background: #065f46;">04</div>
+                <h2 class="section-title" id="s4-title">如何保证增量抽象有序、不漂移？</h2>
+            </div>
+            <p class="section-desc">
+                三层防线：<strong>锚定策略 · 硬校验 · 拓扑监控</strong>
+            </p>
+
+            <div class="card">
+                <div class="flow-steps">
+                    <div class="flow-step">
+                        新代码片段
+                    </div>
+                    <span class="flow-arrow-short">
+                        <svg class="icon-svg" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    </span>
+                    <div class="flow-step highlight-accent">
+                        锚定策略
+                        <div class="step-sub">参照已有模式 Few-shot</div>
+                    </div>
+                    <span class="flow-arrow-short">
+                        <svg class="icon-svg" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    </span>
+                    <div class="flow-step highlight-blue">
+                        硬校验
+                        <div class="step-sub">Schema + 接口一致性</div>
+                    </div>
+                    <span class="flow-arrow-short">
+                        <svg class="icon-svg" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    </span>
+                    <div class="flow-step highlight-green">
+                        拓扑监控
+                        <div class="step-sub">社区漂移检测</div>
+                    </div>
+                    <span class="flow-arrow-short">
+                        <svg class="icon-svg" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    </span>
+                    <div class="flow-step">
+                        入库
+                    </div>
+                </div>
+            </div>
+
+            <details class="expandable" open>
+                <summary>
+                    <span class="toggle-icon">
+                        <svg class="icon-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                    展开细节：每一层如何防止概念漂移？
+                </summary>
+                <div class="details-content">
+                    <div class="grid-2">
+                        <div class="info-box accent-box">
+                            <strong>锚定策略（Prompt 层）</strong>
+                            <p>
+                                每次增量抽象时，在 Prompt 中植入最相似的已有模式作为 Few-shot 示例。例如，如果新模式是一个"带阴影的卡片循环"，系统会先检索出"普通卡片循环"的模式图作为参考，要求 LLM 在此基础上增加阴影步骤，而不是重新创造描述。
+                            </p>
+                        </div>
+                        <div class="info-box blue-box">
+                            <strong>硬校验（程序层）</strong>
+                            <p>
+                                - JSON Schema 验证结构<br>
+                                - 接口类型匹配（produces/consumes 类型必须与已有节点定义一致）<br>
+                                - 不合格输出自动打回，要求 LLM 修正（最多重试 2 次），零 token 消耗。
+                            </p>
+                        </div>
+                        <div class="info-box green-box">
+                            <strong>拓扑监控（结构层）</strong>
+                            <p>
+                                入库后运行社区发现算法，若新模式导致原有社区分裂，或成为意外的 God node，触发预警。同时计算新模式与声称相似的已有模式之间的图距离，距离过远说明抽象不一致。
+                            </p>
+                        </div>
+                        <div class="info-box" style="background: var(--color-bg-alt);">
+                            <strong>编译日志</strong>
+                            <p>
+                                每次增量记录：片段 hash、抽象结果 JSON、引用的已有模式、是否引入新节点、校验结果。支持回溯和定向修复。
+                            </p>
+                        </div>
+                    </div>
+
+                    <p><strong>增量案例：新片段"带圆角的卡片循环"如何对齐？</strong></p>
+                    <div class="flow-steps">
+                        <div class="flow-step" style="border-color: var(--color-green); background: var(--color-green-bg);">
+                            已有模式：卡片循环
+                            <div class="step-sub" style="color: var(--color-green);">produces: Rectangle[]</div>
+                        </div>
+                        <span class="flow-arrow-short" style="font-size: 1rem;">+</span>
+                        <div class="flow-step">
+                            新需求：圆角
+                        </div>
+                        <span class="flow-arrow-short">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                        </span>
+                        <div class="flow-step highlight-green">
+                            锚定检索
+                        </div>
+                        <span class="flow-arrow-short">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                        </span>
+                        <div class="flow-step highlight-blue">
+                            LLM 抽象
+                            <div class="step-sub" style="color: var(--color-blue);">composed_of 圆角子步骤</div>
+                        </div>
+                        <span class="flow-arrow-short">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                        </span>
+                        <div class="flow-step highlight-accent">
+                            校验通过
+                            <div class="step-sub" style="color: var(--color-accent);">入库为 variant_of</div>
+                        </div>
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--color-text-tertiary);">
+                        新模式不是孤立创建，而是作为已有模式的扩展，保持了术语和结构的一致性。
+                    </p>
+                </div>
+            </details>
+
+            <hr class="divider">
+
+            <div class="result-callout">
+                <span class="badge green-badge">效果</span>
+                首次抽象建立术语表与格式骨架，后续所有增量都在同一骨架上生长 —— 有序、可控、不漂移。
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="page-footer">
+            从「事后理解」到「实时合成」 · 从「一次性图谱」到「持续生长的模式库」
+        </footer>
+
+    </div>
+
+    <!-- ============================================
+    Tweaks Panel
+    ============================================ -->
+    <div class="tweaks-toggle" id="tweaksToggle" aria-label="Toggle tweaks panel" tabindex="0" role="button">
+        <svg class="icon-svg" viewBox="0 0 24 24" style="width: 20px; height: 20px;">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+    </div>
+
+    <div class="tweaks-panel" id="tweaksPanel">
+        <h4>Display Settings</h4>
+        <div class="tweak-group">
+            <label>Theme</label>
+            <div class="tweak-options">
+                <button data-theme-value="light" class="active">Light</button>
+                <button data-theme-value="dark">Dark</button>
+            </div>
+        </div>
+        <div class="tweak-group">
+            <label>Font Size</label>
+            <div class="tweak-options">
+                <button data-size="small">S</button>
+                <button data-size="medium" class="active">M</button>
+                <button data-size="large">L</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================
+    JavaScript
+    ============================================ -->
+    <script>
+        (function() {
+            'use strict';
+
+            /* ---- Section scroll animation ---- */
+            var sections = document.querySelectorAll('section');
+
+            var sectionObserver = new IntersectionObserver(function(entries) {
+                entries.forEach(function(entry) {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                    }
+                });
+            }, {
+                threshold: 0.08,
+                rootMargin: '0px 0px -40px 0px'
+            });
+
+            sections.forEach(function(section) { sectionObserver.observe(section); });
+
+            /* ---- Progress sidebar ---- */
+            var dots = document.querySelectorAll('.progress-dot');
+            var lineFill = document.getElementById('lineFill');
+
+            function updateProgress() {
+                var scrollY = window.scrollY;
+                var windowH = window.innerHeight;
+                var docH = document.documentElement.scrollHeight;
+
+                var scrollPercent = Math.min(scrollY / (docH - windowH), 1);
+                if (lineFill) {
+                    lineFill.style.height = (scrollPercent * 100) + '%';
+                }
+
+                var activeIndex = 0;
+                sections.forEach(function(section, i) {
+                    var rect = section.getBoundingClientRect();
+                    var threshold = windowH * 0.3;
+                    if (rect.top < threshold) {
+                        activeIndex = i;
+                    }
+                });
+
+                dots.forEach(function(dot, i) {
+                    if (i === activeIndex) {
+                        dot.classList.add('active');
+                    } else {
+                        dot.classList.remove('active');
+                    }
+                });
+            }
+
+            window.addEventListener('scroll', updateProgress, { passive: true });
+            updateProgress();
+
+            /* ---- Tweaks panel ---- */
+            var toggleBtn = document.getElementById('tweaksToggle');
+            var panel = document.getElementById('tweaksPanel');
+
+            toggleBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                panel.classList.toggle('open');
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!panel.contains(e.target) && e.target !== toggleBtn) {
+                    panel.classList.remove('open');
+                }
+            });
+
+            /* ---- Theme toggle ---- */
+            var themeButtons = document.querySelectorAll('[data-theme-value]');
+            var htmlEl = document.documentElement;
+
+            themeButtons.forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    var theme = this.dataset.themeValue;
+                    htmlEl.setAttribute('data-theme', theme);
+                    themeButtons.forEach(function(b) { b.classList.remove('active'); });
+                    this.classList.add('active');
+                    try { localStorage.setItem('kb-theme', theme); } catch(e) {}
+                });
+            });
+
+            try {
+                var savedTheme = localStorage.getItem('kb-theme');
+                if (savedTheme) {
+                    htmlEl.setAttribute('data-theme', savedTheme);
+                    themeButtons.forEach(function(b) {
+                        b.classList.toggle('active', b.dataset.themeValue === savedTheme);
+                    });
+                }
+            } catch(e) {}
+
+            /* ---- Font size toggle ---- */
+            var sizeButtons = document.querySelectorAll('[data-size]');
+
+            function applyFontSize(size) {
+                var sizes = { small: '14px', medium: '16px', large: '18px' };
+                document.body.style.fontSize = sizes[size] || '16px';
+                sizeButtons.forEach(function(b) {
+                    b.classList.toggle('active', b.dataset.size === size);
+                });
+                try { localStorage.setItem('kb-font-size', size); } catch(e) {}
+            }
+
+            sizeButtons.forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    applyFontSize(this.dataset.size);
+                });
+            });
+
+            try {
+                var savedSize = localStorage.getItem('kb-font-size');
+                if (savedSize) applyFontSize(savedSize);
+            } catch(e) {}
+
+            /* ---- Keyboard shortcuts ---- */
+            document.addEventListener('keydown', function(e) {
+                if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !e.metaKey) {
+                    panel.classList.toggle('open');
+                }
+            });
+
+            /* ============================================
+               Shared Canvas Pan/Zoom Controller
+               ============================================ */
+            function getCSS(name) {
+                return getComputedStyle(document.documentElement)
+                    .getPropertyValue('--color-' + name).trim();
+            }
+
+            function roundRect(ctx, x, y, w, h, r) {
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.lineTo(x + w - r, y);
+                ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+                ctx.lineTo(x + w, y + h - r);
+                ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+                ctx.lineTo(x + r, y + h);
+                ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+                ctx.lineTo(x, y + r);
+                ctx.quadraticCurveTo(x, y, x + r, y);
+                ctx.closePath();
+            }
+
+            function drawNode(ctx, cx, cy, w, h, fill, stroke, title, sub, textColor, subColor, fontSize) {
+                var x = cx - w / 2;
+                var y = cy - h / 2;
+                fontSize = fontSize || 13;
+
+                ctx.fillStyle = fill;
+                ctx.strokeStyle = stroke;
+                ctx.lineWidth = 1.5;
+                roundRect(ctx, x, y, w, h, 10);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = textColor;
+                ctx.font = '500 ' + fontSize + 'px "Noto Sans SC", "PingFang SC", system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(title, cx, cy - 6);
+
+                if (sub) {
+                    ctx.fillStyle = subColor || textColor;
+                    ctx.font = '400 ' + (fontSize - 3) + 'px "Noto Sans SC", system-ui, sans-serif';
+                    ctx.fillText(sub, cx, cy + 12);
+                }
+            }
+
+            function drawHorizArrow(ctx, cx1, cy, w1, cx2, w2, col, lw) {
+                lw = lw || 1.5;
+                var x1 = cx1 + w1 / 2;
+                var x2 = cx2 - w2 / 2;
+
+                ctx.strokeStyle = col;
+                ctx.lineWidth = lw;
+                ctx.beginPath();
+                ctx.moveTo(x1, cy);
+                ctx.lineTo(x2, cy);
+                ctx.stroke();
+
+                var headLen = 10;
+                var headW = 6;
+                ctx.fillStyle = col;
+                ctx.beginPath();
+                ctx.moveTo(x2, cy);
+                ctx.lineTo(x2 - headLen, cy - headW);
+                ctx.lineTo(x2 - headLen, cy + headW);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            function drawCurvedArrow(ctx, cx1, cy1, w1, cx2, cy2, w2, col, lw) {
+                lw = lw || 1.5;
+                var x1 = cx1 + w1 / 2;
+                var y1 = cy1;
+                var x2 = cx2 - w2 / 2;
+                var y2 = cy2;
+
+                var dx = x2 - x1;
+                var dy = y2 - y1;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 2) return;
+
+                var midX = (x1 + x2) / 2;
+                var midY = (y1 + y2) / 2;
+                var bowDir = y1 < y2 ? 1 : -1;
+                var bow = Math.max(8, Math.min(24, dist * 0.14));
+
+                ctx.strokeStyle = col;
+                ctx.lineWidth = lw;
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.quadraticCurveTo(midX, midY + bowDir * bow, x2, y2);
+                ctx.stroke();
+
+                var atx = 2 * (x2 - midX);
+                var aty = 2 * (y2 - (midY + bowDir * bow));
+                var angle = Math.atan2(aty, atx);
+
+                var headLen = 10;
+                ctx.fillStyle = col;
+                ctx.beginPath();
+                ctx.moveTo(x2, y2);
+                ctx.lineTo(
+                    x2 - headLen * Math.cos(angle - 0.4),
+                    y2 - headLen * Math.sin(angle - 0.4)
+                );
+                ctx.lineTo(
+                    x2 - headLen * Math.cos(angle + 0.4),
+                    y2 - headLen * Math.sin(angle + 0.4)
+                );
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            function createCanvasController(canvasId, containerId, zoomLevelId, drawLogic) {
+                var canvas = document.getElementById(canvasId);
+                var container = document.getElementById(containerId);
+                if (!canvas || !container) return null;
+
+                var ctrl = {
+                    canvas: canvas,
+                    container: container,
+                    scale: 1,
+                    dx: 0,
+                    dy: 0,
+                    isDragging: false,
+                    dragStartX: 0,
+                    dragStartY: 0,
+                    startDx: 0,
+                    startDy: 0,
+                    zoomLevelId: zoomLevelId
+                };
+
+                var MIN_SCALE = 0.3;
+                var MAX_SCALE = 4;
+
+                function getLogicalDims(viewportW, viewportH) {
+                    return {
+                        w: Math.max(viewportW * 1.35, 960),
+                        h: viewportH * 1.0
+                    };
+                }
+
+                function constrainPan() {
+                    var rect = canvas.getBoundingClientRect();
+                    var vpw = rect.width;
+                    var vph = rect.height;
+                    var logical = getLogicalDims(vpw, vph);
+                    var LW = logical.w * ctrl.scale;
+                    var LH = logical.h * ctrl.scale;
+
+                    var marginX = vpw * 0.2;
+                    var marginY = vph * 0.2;
+
+                    var minDx = -(LW - vpw * 0.1);
+                    var maxDx = vpw * 0.1;
+                    var minDy = -(LH - vph * 0.1);
+                    var maxDy = vph * 0.1;
+
+                    ctrl.dx = Math.max(minDx - marginX, Math.min(maxDx + marginX, ctrl.dx));
+                    ctrl.dy = Math.max(minDy - marginY, Math.min(maxDy + marginY, ctrl.dy));
+                }
+
+                function draw() {
+                    var rect = canvas.getBoundingClientRect();
+                    var vpw = rect.width;
+                    var vph = rect.height;
+
+                    if (vpw === 0 || vph === 0) return;
+
+                    var dpr = window.devicePixelRatio || 1;
+                    canvas.width = vpw * dpr;
+                    canvas.height = vph * dpr;
+
+                    var ctx = canvas.getContext('2d');
+                    ctx.scale(dpr, dpr);
+
+                    ctx.save();
+                    ctx.translate(ctrl.dx, ctrl.dy);
+                    ctx.scale(ctrl.scale, ctrl.scale);
+
+                    var logical = getLogicalDims(vpw, vph);
+                    drawLogic(ctx, vpw, vph, logical, ctrl);
+
+                    ctx.restore();
+
+                    var zoomEl = document.getElementById(ctrl.zoomLevelId);
+                    if (zoomEl) {
+                        zoomEl.textContent = Math.round(ctrl.scale * 100) + '%';
+                    }
+                }
+
+                function zoomAtPoint(newScale, cx, cy) {
+                    newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+                    if (newScale === ctrl.scale) return;
+
+                    var logicalX = (cx - ctrl.dx) / ctrl.scale;
+                    var logicalY = (cy - ctrl.dy) / ctrl.scale;
+
+                    ctrl.scale = newScale;
+                    ctrl.dx = cx - logicalX * ctrl.scale;
+                    ctrl.dy = cy - logicalY * ctrl.scale;
+
+                    constrainPan();
+                    draw();
+                }
+
+                function setZoom(newScale) {
+                    var rect = canvas.getBoundingClientRect();
+                    zoomAtPoint(newScale, rect.width / 2, rect.height / 2);
+                }
+
+                function resetView() {
+                    var rect = canvas.getBoundingClientRect();
+                    var vpw = rect.width;
+                    var vph = rect.height;
+                    var logical = getLogicalDims(vpw, vph);
+                    ctrl.scale = 1;
+                    ctrl.dx = (vpw - logical.w) / 2;
+                    ctrl.dy = (vph - logical.h) / 2;
+                    constrainPan();
+                    draw();
+                }
+
+                function getPointerPos(e) {
+                    var rect = canvas.getBoundingClientRect();
+                    var clientX = e.clientX || (e.changedTouches && e.changedTouches[0].clientX) || 0;
+                    var clientY = e.clientY || (e.changedTouches && e.changedTouches[0].clientY) || 0;
+                    return {
+                        x: clientX - rect.left,
+                        y: clientY - rect.top
+                    };
+                }
+
+                // ---- mouse events ----
+                canvas.addEventListener('mousedown', function(e) {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    var pos = getPointerPos(e);
+                    ctrl.isDragging = true;
+                    ctrl.dragStartX = pos.x;
+                    ctrl.dragStartY = pos.y;
+                    ctrl.startDx = ctrl.dx;
+                    ctrl.startDy = ctrl.dy;
+                    container.classList.add('grabbing');
+                });
+
+                window.addEventListener('mousemove', function(e) {
+                    if (!ctrl.isDragging) return;
+                    var pos = getPointerPos(e);
+                    ctrl.dx = ctrl.startDx + (pos.x - ctrl.dragStartX);
+                    ctrl.dy = ctrl.startDy + (pos.y - ctrl.dragStartY);
+                    constrainPan();
+                    draw();
+                });
+
+                window.addEventListener('mouseup', function() {
+                    if (ctrl.isDragging) {
+                        ctrl.isDragging = false;
+                        container.classList.remove('grabbing');
+                    }
+                });
+
+                // ---- wheel ----
+                canvas.addEventListener('wheel', function(e) {
+                    e.preventDefault();
+                    var pos = getPointerPos(e);
+                    var delta = -e.deltaY;
+                    if (e.deltaMode === 1) delta *= 30;
+                    if (e.deltaMode === 2) delta *= 300;
+
+                    var factor = 1 + Math.abs(delta) * 0.001;
+                    if (delta < 0) factor = 1 / factor;
+
+                    zoomAtPoint(ctrl.scale * factor, pos.x, pos.y);
+                }, { passive: false });
+
+                // ---- touch ----
+                var lastTouchDist = 0;
+                var touchStartScale = 1;
+
+                canvas.addEventListener('touchstart', function(e) {
+                    e.preventDefault();
+                    if (e.touches.length === 1) {
+                        var pos = getPointerPos(e);
+                        ctrl.isDragging = true;
+                        ctrl.dragStartX = pos.x;
+                        ctrl.dragStartY = pos.y;
+                        ctrl.startDx = ctrl.dx;
+                        ctrl.startDy = ctrl.dy;
+                    } else if (e.touches.length === 2) {
+                        ctrl.isDragging = false;
+                        var t1 = e.touches[0], t2 = e.touches[1];
+                        lastTouchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                        touchStartScale = ctrl.scale;
+                    }
+                }, { passive: false });
+
+                canvas.addEventListener('touchmove', function(e) {
+                    e.preventDefault();
+                    if (e.touches.length === 1 && ctrl.isDragging) {
+                        var pos = getPointerPos(e);
+                        ctrl.dx = ctrl.startDx + (pos.x - ctrl.dragStartX);
+                        ctrl.dy = ctrl.startDy + (pos.y - ctrl.dragStartY);
+                        constrainPan();
+                        draw();
+                    } else if (e.touches.length === 2) {
+                        var t1 = e.touches[0], t2 = e.touches[1];
+                        var dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                        var pinchScale = dist / lastTouchDist;
+                        var newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, touchStartScale * pinchScale));
+
+                        var rect = canvas.getBoundingClientRect();
+                        var centerX = ((t1.clientX + t2.clientX) / 2) - rect.left;
+                        var centerY = ((t1.clientY + t2.clientY) / 2) - rect.top;
+                        zoomAtPoint(newScale, centerX, centerY);
+                    }
+                }, { passive: false });
+
+                canvas.addEventListener('touchend', function(e) {
+                    if (e.touches.length === 0) {
+                        ctrl.isDragging = false;
+                        container.classList.remove('grabbing');
+                    }
+                });
+
+                // ---- zoom buttons ----
+                container.querySelectorAll('[data-zoom]').forEach(function(btn) {
+                    btn.addEventListener('click', function(e) {
+                        var action = this.dataset.zoom;
+                        if (action === 'in') setZoom(ctrl.scale * 1.3);
+                        else if (action === 'out') setZoom(ctrl.scale / 1.3);
+                        else if (action === 'reset') resetView();
+                    });
+                });
+
+                // ---- resize ----
+                var resizeTimer;
+                window.addEventListener('resize', function() {
+                    clearTimeout(resizeTimer);
+                    resizeTimer = setTimeout(function() {
+                        constrainPan();
+                        draw();
+                    }, 100);
+                });
+
+                ctrl.draw = draw;
+                ctrl.resetView = resetView;
+
+                return ctrl;
+            }
+
+            /* ============================================
+               Section 1: Math Knowledge Graph Flow
+               ============================================ */
+            var s1Ctrl = createCanvasController('s1Canvas', 's1Container', 'zoomLevel1', function(ctx, vpw, vph, logical, state) {
+                var LW = logical.w;
+                var LH = logical.h;
+
+                var surface = getCSS('surface');
+                var bgAlt = getCSS('bg-alt');
+                var text = getCSS('text');
+                var textTer = getCSS('text-tertiary');
+                var border = getCSS('border');
+                var accent = getCSS('accent');
+                var accentLight = getCSS('accent-light');
+                var blue = getCSS('blue');
+                var blueBg = getCSS('blue-bg');
+                var green = getCSS('green');
+                var greenBg = getCSS('green-bg');
+
+                // Background
+                ctx.fillStyle = bgAlt;
+                roundRect(ctx, 0, 0, LW, LH, 12);
+                ctx.fill();
+
+                // Node dimensions
+                var nw = Math.min(130, LW * 0.13);
+                var nh = 50;
+
+                // 4 nodes evenly spaced
+                var c1 = LW * 0.12;
+                var c2 = LW * 0.37;
+                var c3 = LW * 0.63;
+                var c4 = LW * 0.88;
+                var row = LH * 0.48;
+
+                var arrColor = textTer;
+
+                // Labels above flow
+                ctx.font = '500 11px "Noto Sans SC", system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillStyle = accent;
+                ctx.fillText('非结构化输入', (c1 + c2) / 2, row - nh / 2 - 10);
+                ctx.fillStyle = blue;
+                ctx.fillText('一次性 LLM 编译', (c2 + c3) / 2, row - nh / 2 - 10);
+                ctx.fillStyle = textTer;
+                ctx.fillText('运行时零 token 推理', (c3 + c4) / 2, row - nh / 2 - 10);
+
+                // Draw nodes
+                drawNode(ctx, c1, row, nw, nh, accentLight, accent, '非结构化语料', 'Figma 脚本', text, textTer, 13);
+                drawNode(ctx, c2, row, nw, nh, blueBg, blue, 'LLM 编译', '一次性抽象', blue, textTer, 13);
+                drawNode(ctx, c3, row, nw, nh, surface, border, '数学结构', '张量 / 图 / 概率模型', text, textTer, 13);
+                drawNode(ctx, c4, row, nw, nh, greenBg, green, '程序化推理', '零 token 查询', green, textTer, 13);
+
+                // Arrows
+                drawHorizArrow(ctx, c1, row, nw, c2, nw, arrColor);
+                drawHorizArrow(ctx, c2, row, nw, c3, nw, arrColor);
+                drawHorizArrow(ctx, c3, row, nw, c4, nw, arrColor);
+            });
+
+            if (s1Ctrl) {
+                s1Ctrl.resetView();
+            }
+
+            /* ============================================
+               Section 2: Graphify Flow Diagram
+               ============================================ */
+            var s2Ctrl = createCanvasController('graphifyCanvas', 'graphifyContainer', 'zoomLevel2', function(ctx, vpw, vph, logical, state) {
+                var LW = logical.w;
+                var LH = logical.h;
+
+                var surface = getCSS('surface');
+                var bgAlt = getCSS('bg-alt');
+                var text = getCSS('text');
+                var textTer = getCSS('text-tertiary');
+                var border = getCSS('border');
+                var accent = getCSS('accent');
+                var accentLight = getCSS('accent-light');
+                var blue = getCSS('blue');
+                var blueBg = getCSS('blue-bg');
+                var green = getCSS('green');
+                var greenBg = getCSS('green-bg');
+
+                // Background
+                ctx.fillStyle = bgAlt;
+                roundRect(ctx, 0, 0, LW, LH, 12);
+                ctx.fill();
+
+                // Node dimensions
+                var nw = Math.min(112, LW * 0.11);
+                var nwL = Math.min(154, LW * 0.15);
+                var nh = 44;
+
+                // Column centers
+                var c1 = LW * 0.08;
+                var c2 = LW * 0.26;
+                var c3 = LW * 0.48;
+                var c4 = LW * 0.72;
+
+                // Row Y
+                var rowA = LH * 0.24;
+                var rowB = LH * 0.62;
+                var rowM = LH * 0.43;
+
+                var arrColor = textTer;
+
+                // Draw nodes
+                drawNode(ctx, c1, rowA, nw, nh, surface, border, '代码文件', '.py .ts .js', text, textTer, 13);
+                drawNode(ctx, c2, rowA, nw, nh, blueBg, blue, 'tree-sitter AST', '类 / 函数 / 调用图', blue, textTer, 13);
+                drawNode(ctx, c1, rowB, nw, nh, surface, border, '文档 / 图片', '.md .pdf .png', text, textTer, 13);
+                drawNode(ctx, c2, rowB, nw, nh, accentLight, accent, 'Claude vision', '概念抽取 + 语义相似边', accent, textTer, 13);
+                drawNode(ctx, c3, rowM, nwL, nh, greenBg, green, '合并图 — Leiden 聚类', '基于边密度的社区发现', green, textTer, 13);
+                drawNode(ctx, c4, rowM, nwL, nh, accentLight, accent, 'graph.json + REPORT.md', 'God nodes · 意外连接 · 建议提问', accent, textTer, 13);
+
+                // Arrows
+                drawHorizArrow(ctx, c1, rowA, nw, c2, nw, arrColor);
+                drawHorizArrow(ctx, c1, rowB, nw, c2, nw, arrColor);
+                drawCurvedArrow(ctx, c2, rowA, nw, c3, rowM, nwL, arrColor);
+                drawCurvedArrow(ctx, c2, rowB, nw, c3, rowM, nwL, arrColor);
+                drawHorizArrow(ctx, c3, rowM, nwL, c4, nwL, arrColor);
+
+                // Path labels
+                ctx.font = '500 11px "Noto Sans SC", system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+
+                var labelAY = rowA - nh / 2 - 10;
+                ctx.fillStyle = blue;
+                ctx.fillText('Path A — 代码解析 (确定性)', (c1 + c2) / 2, labelAY);
+
+                var labelBY = rowB - nh / 2 - 10;
+                ctx.fillStyle = accent;
+                ctx.fillText('Path B — 文档解析 (LLM)', (c1 + c2) / 2, labelBY);
+
+                ctx.font = '400 10px "Noto Sans SC", system-ui, sans-serif';
+                ctx.textBaseline = 'bottom';
+                ctx.fillStyle = textTer;
+                ctx.fillText('两路并行处理后合并', (c2 + c3) / 2, rowB + nh / 2 + 10);
+            });
+
+            if (s2Ctrl) {
+                s2Ctrl.resetView();
+            }
+
+            /* ---- Theme observer for both canvases ---- */
+            var themeObserver = new MutationObserver(function(mutations) {
+                for (var i = 0; i < mutations.length; i++) {
+                    if (mutations[i].attributeName === 'data-theme') {
+                        if (s1Ctrl) s1Ctrl.draw();
+                        if (s2Ctrl) s2Ctrl.draw();
+                        break;
+                    }
+                }
+            });
+            themeObserver.observe(document.documentElement, {
+                attributes: true,
+                attributeFilter: ['data-theme']
+            });
+
+        })();
+    </script>
+</body>
+</html>
