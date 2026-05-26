@@ -16,14 +16,39 @@ const fontCache: { [key: string]: FontName | undefined } = {};
 
 const normalizeName = (str: string) => str.toLowerCase().replace(/[^a-z]/gi, '');
 
+const GENERIC_FONTS: Record<string, string[]> = {
+  sansserif: ['Inter', 'Roboto', 'Arial'],
+  serif: ['Georgia', 'Times New Roman'],
+  monospace: ['Courier New', 'Courier', 'JetBrains Mono'],
+  systemui: ['Inter', 'Roboto'],
+};
+
 async function getMatchingFont(fontStr: string, availableFonts: Font[]) {
   const familySplit = fontStr.split(/\s*,\s*/);
   for (const family of familySplit) {
-    const normalized = normalizeName(family.replace(/['"]/g, '').trim());
-    if (!normalized) continue;
+    const rawName = family.replace(/['"]/g, '').trim();
+    if (!rawName) continue;
+    const normalized = normalizeName(rawName);
     const cached = fontCache[normalized];
     if (cached) return cached;
 
+    // Try generic fallback first
+    if (GENERIC_FONTS[normalized]) {
+      for (const fallback of GENERIC_FONTS[normalized]) {
+        const fn = normalizeName(fallback);
+        for (const af of availableFonts) {
+          if (normalizeName(af.fontName.family) === fn) {
+            await figma.loadFontAsync(af.fontName);
+            fontCache[normalized] = af.fontName;
+            fontCache[fontStr] = af.fontName;
+            console.log('[Font] generic "' + rawName + '" -> "' + af.fontName.family + '"');
+            return af.fontName;
+          }
+        }
+      }
+    }
+
+    // Exact match
     for (const availableFont of availableFonts) {
       const normalizedAvailable = normalizeName(availableFont.fontName.family);
       if (normalizedAvailable === normalized) {
@@ -60,6 +85,18 @@ function processImages(layer: LayerNode) {
           } catch (err) {
             console.warn('Could not get image for layer', err);
           }
+        }
+      } else if (imgFill.url) {
+        try {
+          const response = await fetch(imgFill.url);
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            const image = figma.createImage(uint8Array);
+            imgFill.imageHash = image.hash;
+          }
+        } catch (err) {
+          console.warn('Could not fetch image from URL:', imgFill.url, err);
         }
       }
     })
