@@ -507,6 +507,112 @@
       });
     }
 
+    // --- mergeAdjacentText: merge adjacent TEXT layers under same block ancestor ---
+    // Inline tags (<strong>, <em>) fragment text nodes across multiple TEXT layers.
+    // Merging them into one TEXT layer lets Figma do character-level wrapping,
+    // avoiding misalignment from font-fallback width differences.
+    function mergeAdjacentText(layers, body) {
+      function getBlockAncestor(el) {
+        while (el && el !== body) {
+          var display = getComputedStyle(el).display;
+          if (display && display.indexOf('inline') === -1) return el;
+          el = el.parentElement;
+        }
+        return body;
+      }
+
+      // Find TEXT layers and group by block ancestor
+      var blockGroups = new Map();
+      for (var i = 0; i < layers.length; i++) {
+        if (layers[i].type !== 'TEXT') continue;
+        var textNode = layers[i].ref;
+        var parentEl = textNode ? textNode.parentElement : null;
+        var ancestor = parentEl ? getBlockAncestor(parentEl) : body;
+        var group = blockGroups.get(ancestor);
+        if (!group) { group = []; blockGroups.set(ancestor, group); }
+        group.push({ index: i, layer: layers[i] });
+      }
+
+      // Collect TEXT indices to replace
+      var toRemove = [];
+      var toAdd = [];
+
+      blockGroups.forEach(function(group, ancestor) {
+        if (group.length < 2) return;
+
+        // Sort by document position
+        group.sort(function(a, b) {
+          if (!a.layer.ref || !b.layer.ref) return 0;
+          var pos = a.layer.ref.compareDocumentPosition(b.layer.ref);
+          if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+          if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+          return 0;
+        });
+
+        var firstRef = group[0].layer.ref;
+        var lastRef = group[group.length - 1].layer.ref;
+        if (!firstRef || !lastRef) return;
+
+        try {
+          var range = firstRef.ownerDocument.createRange();
+          range.setStartBefore(firstRef);
+          range.setEndAfter(lastRef);
+          var rect = range.getBoundingClientRect();
+          range.detach();
+
+          // Concatenate characters
+          var mergedChars = '';
+          for (var i = 0; i < group.length; i++) {
+            mergedChars += group[i].layer.characters;
+          }
+
+          // Use styles from the first TEXT layer
+          var base = group[0].layer;
+          var merged = {
+            type: 'TEXT',
+            x: Math.round(rect.left),
+            y: Math.round(rect.top),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+            characters: mergedChars,
+            fills: base.fills,
+            fontSize: base.fontSize,
+            fontFamily: base.fontFamily,
+            fontWeight: base.fontWeight,
+            lineHeight: base.lineHeight,
+            letterSpacing: base.letterSpacing,
+            textAlignHorizontal: base.textAlignHorizontal,
+            textDecoration: base.textDecoration,
+            textCase: base.textCase,
+            opacity: base.opacity,
+            ref: firstRef
+          };
+
+          toAdd.push(merged);
+          for (var i = 0; i < group.length; i++) {
+            toRemove.push(group[i].index);
+          }
+        } catch (e) {}
+      });
+
+      // Rebuild layers: remove merged TEXT, append combined TEXT at end.
+      // makeTree will correctly place them via DOM-based restructuring.
+      if (toRemove.length === 0) return;
+      var removeSet = {};
+      for (var i = 0; i < toRemove.length; i++) removeSet[toRemove[i]] = true;
+      var newLayers = [];
+      for (var i = 0; i < layers.length; i++) {
+        if (!removeSet[i]) newLayers.push(layers[i]);
+      }
+      for (var i = 0; i < toAdd.length; i++) {
+        newLayers.push(toAdd[i]);
+      }
+      layers.length = 0;
+      for (var i = 0; i < newLayers.length; i++) {
+        layers.push(newLayers[i]);
+      }
+    }
+
     // --- removeRefs ---
     function removeRefs(layers) {
       layers.forEach(function(layer) {
@@ -729,6 +835,12 @@
         range.selectNode(node);
         var tRect = fastClone(range.getBoundingClientRect());
         var lh = parseUnits(pComputed.lineHeight);
+        if (!lh && pComputed.lineHeight === 'normal') {
+          var fs = parseUnits(pComputed.fontSize);
+          if (fs) {
+            lh = { unit: 'PIXELS', value: Math.round(fs.value * 1.2) };
+          }
+        }
         range.detach();
 
         if (lh && tRect.height < lh.value) {
@@ -778,6 +890,9 @@
 
         layers.push(textNode);
       }
+
+      // Merge adjacent TEXT fragments from inline tags into single TEXT nodes
+      mergeAdjacentText(layers, el);
 
       // Root frame
       var root = {
