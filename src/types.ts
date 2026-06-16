@@ -16,7 +16,7 @@ export interface RectangleLayer {
   topRightRadius?: number;
   bottomRightRadius?: number;
   bottomLeftRadius?: number;
-  effects?: ShadowEffect[];
+  effects?: EffectNode[];
   opacity?: number;
   ref?: Element;
 }
@@ -28,10 +28,11 @@ export interface TextLayer {
   width: number;
   height: number;
   characters: string;
-  fills?: SolidPaint[];
+  fills?: Paint[];
   fontSize?: number;
   fontFamily?: string; // raw CSS font-family string, resolved in code.ts
   fontWeight?: number;
+  fontStyle?: string;
   lineHeight?: { unit: 'PIXELS'; value: number };
   letterSpacing?: { unit: 'PIXELS'; value: number };
   textAlignHorizontal?: 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFIED';
@@ -65,7 +66,21 @@ export interface FrameLayer {
   };
   ref?: Element;
   backgrounds?: Paint[];
+  fills?: Paint[];
+  effects?: EffectNode[];
   layoutMode?: 'HORIZONTAL' | 'VERTICAL' | 'NONE';
+  itemSpacing?: number;
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  primaryAxisAlignItems?: 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';
+  counterAxisAlignItems?: 'MIN' | 'CENTER' | 'MAX' | 'BASELINE';
+  primaryAxisSizingMode?: 'FIXED' | 'AUTO';
+  counterAxisSizingMode?: 'FIXED' | 'AUTO';
+  layoutWrap?: 'NO_WRAP' | 'WRAP';
+  layoutConfidence?: 'high' | 'medium' | 'low';
+  layoutReason?: string;
 }
 
 export interface SolidPaint {
@@ -82,7 +97,19 @@ export interface ImagePaint {
   intArr?: Uint8Array;
 }
 
-export type Paint = SolidPaint | ImagePaint;
+export interface GradientStop {
+  color: { r: number; g: number; b: number; a: number };
+  position: number;
+}
+
+export interface GradientPaint {
+  type: 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL' | 'GRADIENT_ANGULAR';
+  gradientStops: GradientStop[];
+  gradientTransform?: Transform;
+  visible?: boolean;
+}
+
+export type Paint = SolidPaint | ImagePaint | GradientPaint;
 
 export interface ShadowEffect {
   type: 'DROP_SHADOW' | 'INNER_SHADOW';
@@ -94,6 +121,14 @@ export interface ShadowEffect {
   blendMode: string;
 }
 
+export interface BlurEffect {
+  type: 'BACKGROUND_BLUR' | 'LAYER_BLUR';
+  radius: number;
+  visible: boolean;
+}
+
+export type EffectNode = ShadowEffect | BlurEffect;
+
 export interface RgbColor {
   r: number;
   g: number;
@@ -101,7 +136,33 @@ export interface RgbColor {
   a: number;
 }
 
+export interface ImportWarning {
+  code: string;
+  message: string;
+  nodeId?: string;
+  severity?: 'info' | 'warning' | 'error';
+}
+
+export interface RectLike {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ImportDocument {
+  version: 1;
+  source: 'local-html';
+  title?: string;
+  layers: LayerNode[];
+  viewportRect: RectLike;
+  documentRect: RectLike;
+  devicePixelRatio: number;
+  warnings: ImportWarning[];
+}
+
 // Message payload from UI to plugin main thread
 export interface ImportPayload {
   layers: LayerNode[];
+  document?: ImportDocument;
 }
