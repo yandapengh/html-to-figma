@@ -178,6 +178,7 @@
         stops.push({ color: { r: rgb.r, g: rgb.g, b: rgb.b, a: rgb.a }, position: pos });
       }
       if (stops.length < 2) return null;
+      fixTransparentGradientStops(stops);
       for (var i = 0; i < stops.length; i++) {
         if (stops[i].position == null) {
           stops[i].position = stops.length === 1 ? 0 : i / (stops.length - 1);
@@ -186,6 +187,167 @@
       }
       return stops;
     }
+
+    function fixTransparentGradientStops(stops) {
+      for (var i = 0; i < stops.length; i++) {
+        var stop = stops[i];
+        if (!stop.color || stop.color.a !== 0) continue;
+
+        var source = null;
+        for (var p = i - 1; p >= 0; p--) {
+          if (stops[p].color && stops[p].color.a !== 0) {
+            source = stops[p].color;
+            break;
+          }
+        }
+        if (!source) {
+          for (var n = i + 1; n < stops.length; n++) {
+            if (stops[n].color && stops[n].color.a !== 0) {
+              source = stops[n].color;
+              break;
+            }
+          }
+        }
+        if (source) {
+          stop.color.r = source.r;
+          stop.color.g = source.g;
+          stop.color.b = source.b;
+        }
+      }
+    }
+
+    function getGradientPrelude(str) {
+      var open = str.indexOf('(');
+      if (open === -1) return '';
+      var depth = 0;
+      for (var i = open + 1; i < str.length; i++) {
+        var ch = str[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+          if (depth === 0) break;
+          depth--;
+        } else if (ch === ',' && depth === 0) {
+          return str.slice(open + 1, i).trim();
+        }
+      }
+      return '';
+    }
+
+    function parsePositionToken(token, axis, fallback) {
+      if (!token) return fallback;
+      token = token.toLowerCase();
+      if (token === 'center') return 0.5;
+      if (axis === 'x') {
+        if (token === 'left') return 0;
+        if (token === 'right') return 1;
+      } else {
+        if (token === 'top') return 0;
+        if (token === 'bottom') return 1;
+      }
+      if (token.indexOf('%') !== -1) return parseFloat(token) / 100;
+      if (token === '0' || token === '0px') return 0;
+      return fallback;
+    }
+
+    function parseRadialCenter(prelude) {
+      var center = { x: 0.5, y: 0.5 };
+      var atMatch = prelude.match(/\bat\b\s+(.+)$/i);
+      if (!atMatch) return center;
+
+      var tokens = atMatch[1].trim().split(/\s+/).filter(Boolean);
+      if (!tokens.length) return center;
+      if (tokens.length === 1) {
+        var only = tokens[0].toLowerCase();
+        if (only === 'top' || only === 'bottom') center.y = parsePositionToken(only, 'y', 0.5);
+        else center.x = parsePositionToken(only, 'x', 0.5);
+        return center;
+      }
+
+      var first = tokens[0].toLowerCase();
+      var second = tokens[1].toLowerCase();
+      if (first === 'top' || first === 'bottom') {
+        center.y = parsePositionToken(first, 'y', 0.5);
+        center.x = parsePositionToken(second, 'x', 0.5);
+      } else if (first === 'left' || first === 'right') {
+        center.x = parsePositionToken(first, 'x', 0.5);
+        center.y = parsePositionToken(second, 'y', 0.5);
+      } else {
+        center.x = parsePositionToken(first, 'x', 0.5);
+        center.y = parsePositionToken(second, 'y', 0.5);
+      }
+      center.x = Math.min(1, Math.max(0, center.x));
+      center.y = Math.min(1, Math.max(0, center.y));
+      return center;
+    }
+
+    function parseExplicitRadialSize(sizePart, center) {
+      var tokens = sizePart.replace(/\b(circle|ellipse)\b/gi, '').trim().split(/\s+/).filter(Boolean);
+      var values = tokens.filter(function(token) { return token.indexOf('%') !== -1 || token === '0' || token === '0px'; });
+      if (!values.length) return null;
+      var rx = parsePositionToken(values[0], 'x', null);
+      var ry = values.length > 1 ? parsePositionToken(values[1], 'y', null) : rx;
+      if (rx == null || ry == null) return null;
+      return { x: Math.max(0.0001, rx), y: Math.max(0.0001, ry) };
+    }
+
+    function radialRadiiFromSize(sizePart, center) {
+      var explicit = parseExplicitRadialSize(sizePart, center);
+      if (explicit) return explicit;
+
+      var lower = sizePart.toLowerCase();
+      var shapeCircle = lower.indexOf('circle') !== -1;
+      var sizeKeyword = 'farthest-corner';
+      if (lower.indexOf('closest-side') !== -1) sizeKeyword = 'closest-side';
+      else if (lower.indexOf('farthest-side') !== -1) sizeKeyword = 'farthest-side';
+      else if (lower.indexOf('closest-corner') !== -1) sizeKeyword = 'closest-corner';
+
+      var nearX = Math.min(center.x, 1 - center.x);
+      var farX = Math.max(center.x, 1 - center.x);
+      var nearY = Math.min(center.y, 1 - center.y);
+      var farY = Math.max(center.y, 1 - center.y);
+      var rx;
+      var ry;
+      if (shapeCircle) {
+        var radius;
+        if (sizeKeyword === 'closest-side') radius = Math.min(nearX, nearY);
+        else if (sizeKeyword === 'farthest-side') radius = Math.max(farX, farY);
+        else if (sizeKeyword === 'closest-corner') radius = Math.sqrt(nearX * nearX + nearY * nearY);
+        else radius = Math.sqrt(farX * farX + farY * farY);
+        rx = radius;
+        ry = radius;
+      } else if (sizeKeyword === 'closest-side') {
+        rx = nearX;
+        ry = nearY;
+      } else if (sizeKeyword === 'farthest-side') {
+        rx = farX;
+        ry = farY;
+      } else if (sizeKeyword === 'closest-corner') {
+        rx = Math.SQRT2 * nearX;
+        ry = Math.SQRT2 * nearY;
+      } else {
+        rx = Math.SQRT2 * farX;
+        ry = Math.SQRT2 * farY;
+      }
+      return { x: Math.max(0.0001, rx), y: Math.max(0.0001, ry) };
+    }
+
+    function radialGradientTransform(str) {
+      var prelude = getGradientPrelude(str);
+      if (prelude && prelude.search(/\bat\b/i) === -1 && /^(rgba?\(|hsla?\(|#[a-fA-F0-9]|transparent\b)/i.test(prelude.trim())) {
+        prelude = '';
+      }
+      var center = parseRadialCenter(prelude);
+      var atIndex = prelude.search(/\bat\b/i);
+      var sizePart = atIndex === -1 ? prelude : prelude.slice(0, atIndex);
+      var radii = radialRadiiFromSize(sizePart, center);
+      var sx = 0.5 / radii.x;
+      var sy = 0.5 / radii.y;
+      return [
+        [sx, 0, 0.5 - center.x * sx],
+        [0, sy, 0.5 - center.y * sy]
+      ];
+    }
+
     function parseGradient(str) {
       if (!str || str === 'none') return null;
       if (str.indexOf('linear-gradient') !== -1) {
@@ -195,7 +357,7 @@
         return { type: 'GRADIENT_LINEAR', gradientStops: s, gradientTransform: [[cos, sin, 0.5 - cos * 0.5 - sin * 0.5], [-sin, cos, 0.5 + sin * 0.5 - cos * 0.5]], visible: true };
       }
       if (str.indexOf('radial-gradient') !== -1) {
-        var s2 = parseColorStops(str); return s2 ? { type: 'GRADIENT_RADIAL', gradientStops: s2, gradientTransform: [[1, 0, 0], [0, 1, 0]], visible: true } : null;
+        var s2 = parseColorStops(str); return s2 ? { type: 'GRADIENT_RADIAL', gradientStops: s2, gradientTransform: radialGradientTransform(str), visible: true } : null;
       }
       if (str.indexOf('conic-gradient') !== -1) {
         var s3 = parseColorStops(str); return s3 ? { type: 'GRADIENT_ANGULAR', gradientStops: s3, gradientTransform: [[1, 0, 0], [0, 1, 0]], visible: true } : null;
@@ -288,7 +450,6 @@
       var m = colorString.match(/rgba?\(([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s*(?:\/\s*([\d\.]+))?\)/);
       if (m) {
         var a = m[4] !== undefined ? parseFloat(m[4]) : 1;
-        if (a === 0) return null;
         return { r: parseInt(m[1]) / 255, g: parseInt(m[2]) / 255, b: parseInt(m[3]) / 255, a: a };
       }
       // Legacy CSS: rgb(1, 86, 240) or rgba(1, 86, 240, 0.5)
