@@ -7,7 +7,16 @@ declare var process: {
   };
 };
 
-import { LayerNode, Paint, SolidPaint, ImagePaint, FrameLayer, ShadowEffect } from './src/types';
+import {
+  LayerNode,
+  Paint,
+  SolidPaint,
+  ImagePaint,
+  FrameLayer,
+  ShadowEffect,
+  ImportDocument,
+  ImportWarning,
+} from './src/types';
 
 figma.showUI(__html__, { width: 320, height: 520 });
 
@@ -15,6 +24,8 @@ const defaultFont = { family: 'Roboto', style: 'Regular' };
 const fontCache: { [key: string]: FontName | undefined } = {};
 
 const normalizeName = (str: string) => str.toLowerCase().replace(/[^a-z]/gi, '');
+const fontCacheKey = (family: string, weight?: number, fontStyle?: string) =>
+  `${normalizeName(family)}:${weight || 'any'}:${fontStyle || 'normal'}`;
 
 const GENERIC_FONTS: Record<string, string[]> = {
   sansserif: ['Inter', 'Roboto', 'Arial'],
@@ -23,43 +34,93 @@ const GENERIC_FONTS: Record<string, string[]> = {
   systemui: ['Inter', 'Roboto'],
 };
 
-async function getMatchingFont(fontStr: string, availableFonts: Font[]) {
+function fontStyleScore(styleName: string, weight?: number, fontStyle?: string): number {
+  const normalized = styleName.toLowerCase();
+  let score = 0;
+  if (fontStyle === 'italic' && normalized.includes('italic')) score += 20;
+  if (fontStyle !== 'italic' && !normalized.includes('italic')) score += 10;
+  if (weight) {
+    const weightByName: Record<string, number> = {
+      thin: 100,
+      extralight: 200,
+      light: 300,
+      regular: 400,
+      normal: 400,
+      medium: 500,
+      semibold: 600,
+      demi: 600,
+      bold: 700,
+      extrabold: 800,
+      black: 900,
+    };
+    let styleWeight = 400;
+    for (const key of Object.keys(weightByName)) {
+      if (normalized.replace(/\s+/g, '').includes(key)) {
+        styleWeight = weightByName[key];
+        break;
+      }
+    }
+    score -= Math.abs(styleWeight - weight) / 100;
+  }
+  if (normalized === 'regular') score += 1;
+  return score;
+}
+
+async function getMatchingFont(
+  fontStr: string,
+  availableFonts: Font[],
+  weight?: number,
+  fontStyle?: string
+) {
   const familySplit = fontStr.split(/\s*,\s*/);
   for (const family of familySplit) {
     const rawName = family.replace(/['"]/g, '').trim();
     if (!rawName) continue;
     const normalized = normalizeName(rawName);
-    const cached = fontCache[normalized];
+    const cacheKey = fontCacheKey(rawName, weight, fontStyle);
+    const cached = fontCache[cacheKey];
     if (cached) return cached;
 
     // Try generic fallback first
     if (GENERIC_FONTS[normalized]) {
       for (const fallback of GENERIC_FONTS[normalized]) {
         const fn = normalizeName(fallback);
-        for (const af of availableFonts) {
-          if (normalizeName(af.fontName.family) === fn) {
-            await figma.loadFontAsync(af.fontName);
-            fontCache[normalized] = af.fontName;
-            fontCache[fontStr] = af.fontName;
-            console.log('[Font] generic "' + rawName + '" -> "' + af.fontName.family + '"');
-            return af.fontName;
-          }
+        const match = bestFamilyMatch(availableFonts, fn, weight, fontStyle);
+        if (match) {
+          await figma.loadFontAsync(match.fontName);
+          fontCache[cacheKey] = match.fontName;
+          fontCache[fontCacheKey(fontStr, weight, fontStyle)] = match.fontName;
+          console.log('[Font] generic "' + rawName + '" -> "' + match.fontName.family + '"');
+          return match.fontName;
         }
       }
     }
 
     // Exact match
-    for (const availableFont of availableFonts) {
-      const normalizedAvailable = normalizeName(availableFont.fontName.family);
-      if (normalizedAvailable === normalized) {
-        await figma.loadFontAsync(availableFont.fontName);
-        fontCache[normalized] = availableFont.fontName;
-        fontCache[fontStr] = availableFont.fontName;
-        return availableFont.fontName;
-      }
+    const match = bestFamilyMatch(availableFonts, normalized, weight, fontStyle);
+    if (match) {
+      await figma.loadFontAsync(match.fontName);
+      fontCache[cacheKey] = match.fontName;
+      fontCache[fontCacheKey(fontStr, weight, fontStyle)] = match.fontName;
+      return match.fontName;
     }
   }
   return defaultFont;
+}
+
+function bestFamilyMatch(
+  availableFonts: Font[],
+  normalizedFamily: string,
+  weight?: number,
+  fontStyle?: string
+): Font | undefined {
+  return availableFonts
+    .filter((font) => normalizeName(font.fontName.family) === normalizedFamily)
+    .sort(
+      (a, b) =>
+        fontStyleScore(b.fontName.style, weight, fontStyle) -
+        fontStyleScore(a.fontName.style, weight, fontStyle)
+    )[0];
 }
 
 function isImageFill(fill: Paint): fill is ImagePaint {
@@ -126,6 +187,20 @@ async function traverseLayers(
 }
 
 function assign(a: any, b: any) {
+  const ignoredKeys = [
+    'width',
+    'height',
+    'type',
+    'ref',
+    'children',
+    'svg',
+    'fontFamily',
+    'fontWeight',
+    'fontStyle',
+    'isPseudoElement',
+    'layoutConfidence',
+    'layoutReason',
+  ];
   for (const key in b) {
     const value = b[key];
     if (key === 'data' && value && typeof value === 'object') {
@@ -134,7 +209,7 @@ function assign(a: any, b: any) {
       a.setSharedPluginData?.('builder', 'data', JSON.stringify(mergedData));
     } else if (
       typeof value !== 'undefined' &&
-      ['width', 'height', 'type', 'ref', 'children', 'svg', 'fontFamily'].indexOf(key) === -1
+      ignoredKeys.indexOf(key) === -1
     ) {
       try {
         a[key] = value;
@@ -143,6 +218,48 @@ function assign(a: any, b: any) {
       }
     }
   }
+}
+
+function applyFrameLayout(frame: FrameNode, layer: FrameLayer) {
+  if (layer.layoutConfidence !== 'high') return;
+  if (!layer.layoutMode || layer.layoutMode === 'NONE') return;
+  try {
+    frame.layoutMode = layer.layoutMode;
+    if (typeof layer.itemSpacing === 'number') frame.itemSpacing = layer.itemSpacing;
+    if (typeof layer.paddingTop === 'number') frame.paddingTop = layer.paddingTop;
+    if (typeof layer.paddingRight === 'number') frame.paddingRight = layer.paddingRight;
+    if (typeof layer.paddingBottom === 'number') frame.paddingBottom = layer.paddingBottom;
+    if (typeof layer.paddingLeft === 'number') frame.paddingLeft = layer.paddingLeft;
+    if (layer.primaryAxisAlignItems) frame.primaryAxisAlignItems = layer.primaryAxisAlignItems;
+    if (layer.counterAxisAlignItems) frame.counterAxisAlignItems = layer.counterAxisAlignItems;
+    if (layer.primaryAxisSizingMode) frame.primaryAxisSizingMode = layer.primaryAxisSizingMode;
+    if (layer.counterAxisSizingMode) frame.counterAxisSizingMode = layer.counterAxisSizingMode;
+    if (layer.layoutWrap && 'layoutWrap' in frame) {
+      (frame as any).layoutWrap = layer.layoutWrap;
+    }
+  } catch (err) {
+    console.warn('Could not apply inferred auto layout', layer.layoutReason, err);
+  }
+}
+
+function normalizeImportData(data: any): { document?: ImportDocument; layers: LayerNode[]; warnings: ImportWarning[] } {
+  const document = data && data.version === 1 && Array.isArray(data.layers)
+    ? (data as ImportDocument)
+    : data && data.document && Array.isArray(data.document.layers)
+    ? (data.document as ImportDocument)
+    : undefined;
+  const layers = document?.layers || data?.layers || [];
+  const warnings = document?.warnings || data?.warnings || [];
+  return { document, layers, warnings };
+}
+
+function notifyImportWarnings(warnings: ImportWarning[]) {
+  if (!warnings.length) return;
+  const important = warnings.filter((warning) => warning.severity !== 'info');
+  figma.notify(
+    `Imported with ${important.length || warnings.length} warning${(important.length || warnings.length) === 1 ? '' : 's'}. See console for details.`
+  );
+  console.warn('[HTML to Figma] Import warnings', warnings);
 }
 
 function postSelection() {
@@ -172,7 +289,7 @@ figma.ui.onmessage = async (msg: any) => {
 
   if (msg.type === 'import') {
     const { data } = msg;
-    const { layers } = data as { layers: LayerNode[] };
+    const { layers, warnings } = normalizeImportData(data);
 
     if (!layers || !layers.length) {
       figma.notify('No layers to import', { error: true });
@@ -180,9 +297,7 @@ figma.ui.onmessage = async (msg: any) => {
     }
 
     try {
-      const availableFonts = (await figma.listAvailableFontsAsync()).filter(
-        (font) => font.fontName.style === 'Regular'
-      );
+      const availableFonts = await figma.listAvailableFontsAsync();
       await figma.loadFontAsync(defaultFont);
 
       const rects: SceneNode[] = [];
@@ -198,6 +313,7 @@ figma.ui.onmessage = async (msg: any) => {
               frame.y = layer.y || 0;
               frame.resize(Math.max(layer.width || 1, 1), Math.max(layer.height || 1, 1));
               assign(frame, layer);
+              applyFrameLayout(frame, layer);
               rects.push(frame);
               ((parent && (parent as any).ref) || baseFrame).appendChild(frame);
               (layer as any).ref = frame;
@@ -229,7 +345,12 @@ figma.ui.onmessage = async (msg: any) => {
               const text = figma.createText();
               const layerFontFamily = (layer as any).fontFamily;
               if (layerFontFamily) {
-                const family = await getMatchingFont(layerFontFamily, availableFonts);
+                const family = await getMatchingFont(
+                  layerFontFamily,
+                  availableFonts,
+                  (layer as any).fontWeight,
+                  (layer as any).fontStyle
+                );
                 text.fontName = family;
               }
               assign(text, layer);
@@ -276,6 +397,7 @@ figma.ui.onmessage = async (msg: any) => {
       });
 
       figma.viewport.scrollAndZoomIntoView([frameRoot]);
+      notifyImportWarnings(warnings);
 
       if (process.env.NODE_ENV !== 'development') {
         figma.closePlugin();

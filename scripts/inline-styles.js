@@ -32,17 +32,12 @@ const outputPath = process.argv[3]
   : resolvedInput.replace(/\.html?$/i, '_inlined.html');
 
 async function main() {
-  // Use server's playwright to avoid duplicating Chromium installs
   let playwright;
   try {
-    playwright = require('../server/node_modules/playwright');
+    playwright = require('playwright');
   } catch (e) {
-    try {
-      playwright = require(path.join(__dirname, '../server/node_modules/playwright'));
-    } catch (e2) {
-      console.error('Playwright not found. Run: npm run server:install');
-      process.exit(1);
-    }
+    console.error('Playwright not found. Run: npm install');
+    process.exit(1);
   }
 
   const html = fs.readFileSync(resolvedInput, 'utf-8');
