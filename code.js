@@ -5,45 +5,80 @@
   var defaultFont = { family: "Roboto", style: "Regular" };
   var fontCache = {};
   var normalizeName = (str) => str.toLowerCase().replace(/[^a-z]/gi, "");
+  var fontCacheKey = (family, weight, fontStyle) => `${normalizeName(family)}:${weight || "any"}:${fontStyle || "normal"}`;
   var GENERIC_FONTS = {
     sansserif: ["Inter", "Roboto", "Arial"],
     serif: ["Georgia", "Times New Roman"],
     monospace: ["Courier New", "Courier", "JetBrains Mono"],
     systemui: ["Inter", "Roboto"]
   };
-  async function getMatchingFont(fontStr, availableFonts) {
+  function fontStyleScore(styleName, weight, fontStyle) {
+    const normalized = styleName.toLowerCase();
+    let score = 0;
+    if (fontStyle === "italic" && normalized.includes("italic")) score += 20;
+    if (fontStyle !== "italic" && !normalized.includes("italic")) score += 10;
+    if (weight) {
+      const weightByName = {
+        thin: 100,
+        extralight: 200,
+        light: 300,
+        regular: 400,
+        normal: 400,
+        medium: 500,
+        semibold: 600,
+        demi: 600,
+        bold: 700,
+        extrabold: 800,
+        black: 900
+      };
+      let styleWeight = 400;
+      for (const key of Object.keys(weightByName)) {
+        if (normalized.replace(/\s+/g, "").includes(key)) {
+          styleWeight = weightByName[key];
+          break;
+        }
+      }
+      score -= Math.abs(styleWeight - weight) / 100;
+    }
+    if (normalized === "regular") score += 1;
+    return score;
+  }
+  async function getMatchingFont(fontStr, availableFonts, weight, fontStyle) {
     const familySplit = fontStr.split(/\s*,\s*/);
     for (const family of familySplit) {
       const rawName = family.replace(/['"]/g, "").trim();
       if (!rawName) continue;
       const normalized = normalizeName(rawName);
-      const cached = fontCache[normalized];
+      const cacheKey = fontCacheKey(rawName, weight, fontStyle);
+      const cached = fontCache[cacheKey];
       if (cached) return cached;
       if (GENERIC_FONTS[normalized]) {
         for (const fallback of GENERIC_FONTS[normalized]) {
           const fn = normalizeName(fallback);
-          for (const af of availableFonts) {
-            if (normalizeName(af.fontName.family) === fn) {
-              await figma.loadFontAsync(af.fontName);
-              fontCache[normalized] = af.fontName;
-              fontCache[fontStr] = af.fontName;
-              console.log('[Font] generic "' + rawName + '" -> "' + af.fontName.family + '"');
-              return af.fontName;
-            }
+          const match2 = bestFamilyMatch(availableFonts, fn, weight, fontStyle);
+          if (match2) {
+            await figma.loadFontAsync(match2.fontName);
+            fontCache[cacheKey] = match2.fontName;
+            fontCache[fontCacheKey(fontStr, weight, fontStyle)] = match2.fontName;
+            console.log('[Font] generic "' + rawName + '" -> "' + match2.fontName.family + '"');
+            return match2.fontName;
           }
         }
       }
-      for (const availableFont of availableFonts) {
-        const normalizedAvailable = normalizeName(availableFont.fontName.family);
-        if (normalizedAvailable === normalized) {
-          await figma.loadFontAsync(availableFont.fontName);
-          fontCache[normalized] = availableFont.fontName;
-          fontCache[fontStr] = availableFont.fontName;
-          return availableFont.fontName;
-        }
+      const match = bestFamilyMatch(availableFonts, normalized, weight, fontStyle);
+      if (match) {
+        await figma.loadFontAsync(match.fontName);
+        fontCache[cacheKey] = match.fontName;
+        fontCache[fontCacheKey(fontStr, weight, fontStyle)] = match.fontName;
+        return match.fontName;
       }
     }
     return defaultFont;
+  }
+  function bestFamilyMatch(availableFonts, normalizedFamily, weight, fontStyle) {
+    return availableFonts.filter((font) => normalizeName(font.fontName.family) === normalizedFamily).sort(
+      (a, b) => fontStyleScore(b.fontName.style, weight, fontStyle) - fontStyleScore(a.fontName.style, weight, fontStyle)
+    )[0];
   }
   function isImageFill(fill) {
     return fill.type === "IMAGE";
@@ -95,13 +130,27 @@
   }
   function assign(a, b) {
     var _a, _b;
+    const ignoredKeys = [
+      "width",
+      "height",
+      "type",
+      "ref",
+      "children",
+      "svg",
+      "fontFamily",
+      "fontWeight",
+      "fontStyle",
+      "isPseudoElement",
+      "layoutConfidence",
+      "layoutReason"
+    ];
     for (const key in b) {
       const value = b[key];
       if (key === "data" && value && typeof value === "object") {
         const currentData = JSON.parse(((_a = a.getSharedPluginData) == null ? void 0 : _a.call(a, "builder", "data")) || "{}") || {};
         const mergedData = Object.assign({}, currentData, value);
         (_b = a.setSharedPluginData) == null ? void 0 : _b.call(a, "builder", "data", JSON.stringify(mergedData));
-      } else if (typeof value !== "undefined" && ["width", "height", "type", "ref", "children", "svg", "fontFamily"].indexOf(key) === -1) {
+      } else if (typeof value !== "undefined" && ignoredKeys.indexOf(key) === -1) {
         try {
           a[key] = value;
         } catch (err) {
@@ -109,6 +158,41 @@
         }
       }
     }
+  }
+  function applyFrameLayout(frame, layer) {
+    if (layer.layoutConfidence !== "high") return;
+    if (!layer.layoutMode || layer.layoutMode === "NONE") return;
+    try {
+      frame.layoutMode = layer.layoutMode;
+      if (typeof layer.itemSpacing === "number") frame.itemSpacing = layer.itemSpacing;
+      if (typeof layer.paddingTop === "number") frame.paddingTop = layer.paddingTop;
+      if (typeof layer.paddingRight === "number") frame.paddingRight = layer.paddingRight;
+      if (typeof layer.paddingBottom === "number") frame.paddingBottom = layer.paddingBottom;
+      if (typeof layer.paddingLeft === "number") frame.paddingLeft = layer.paddingLeft;
+      if (layer.primaryAxisAlignItems) frame.primaryAxisAlignItems = layer.primaryAxisAlignItems;
+      if (layer.counterAxisAlignItems) frame.counterAxisAlignItems = layer.counterAxisAlignItems;
+      if (layer.primaryAxisSizingMode) frame.primaryAxisSizingMode = layer.primaryAxisSizingMode;
+      if (layer.counterAxisSizingMode) frame.counterAxisSizingMode = layer.counterAxisSizingMode;
+      if (layer.layoutWrap && "layoutWrap" in frame) {
+        frame.layoutWrap = layer.layoutWrap;
+      }
+    } catch (err) {
+      console.warn("Could not apply inferred auto layout", layer.layoutReason, err);
+    }
+  }
+  function normalizeImportData(data) {
+    const document = data && data.version === 1 && Array.isArray(data.layers) ? data : data && data.document && Array.isArray(data.document.layers) ? data.document : void 0;
+    const layers = (document == null ? void 0 : document.layers) || (data == null ? void 0 : data.layers) || [];
+    const warnings = (document == null ? void 0 : document.warnings) || (data == null ? void 0 : data.warnings) || [];
+    return { document, layers, warnings };
+  }
+  function notifyImportWarnings(warnings) {
+    if (!warnings.length) return;
+    const important = warnings.filter((warning) => warning.severity !== "info");
+    figma.notify(
+      `Imported with ${important.length || warnings.length} warning${(important.length || warnings.length) === 1 ? "" : "s"}. See console for details.`
+    );
+    console.warn("[HTML to Figma] Import warnings", warnings);
   }
   function postSelection() {
     figma.ui.postMessage({
@@ -132,15 +216,13 @@
     }
     if (msg.type === "import") {
       const { data } = msg;
-      const { layers } = data;
+      const { layers, warnings } = normalizeImportData(data);
       if (!layers || !layers.length) {
         figma.notify("No layers to import", { error: true });
         return;
       }
       try {
-        const availableFonts = (await figma.listAvailableFontsAsync()).filter(
-          (font) => font.fontName.style === "Regular"
-        );
+        const availableFonts = await figma.listAvailableFontsAsync();
         await figma.loadFontAsync(defaultFont);
         const rects = [];
         let baseFrame = figma.currentPage;
@@ -154,6 +236,7 @@
                 frame.y = layer.y || 0;
                 frame.resize(Math.max(layer.width || 1, 1), Math.max(layer.height || 1, 1));
                 assign(frame, layer);
+                applyFrameLayout(frame, layer);
                 rects.push(frame);
                 (parent && parent.ref || baseFrame).appendChild(frame);
                 layer.ref = frame;
@@ -185,7 +268,12 @@
                 const text = figma.createText();
                 const layerFontFamily = layer.fontFamily;
                 if (layerFontFamily) {
-                  const family = await getMatchingFont(layerFontFamily, availableFonts);
+                  const family = await getMatchingFont(
+                    layerFontFamily,
+                    availableFonts,
+                    layer.fontWeight,
+                    layer.fontStyle
+                  );
                   text.fontName = family;
                 }
                 assign(text, layer);
@@ -221,6 +309,7 @@
           rootId: frameRoot.id
         });
         figma.viewport.scrollAndZoomIntoView([frameRoot]);
+        notifyImportWarnings(warnings);
         if (false) {
           figma.closePlugin();
         }

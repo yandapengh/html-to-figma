@@ -74,14 +74,43 @@
   // Runs inside the iframe context to extract DOM → Figma layers.
   (function () {
     // Disable animations for capture
-    var ANIMATION_OVERRIDE = '*,*::before,*::after{animation:none!important;animation-duration:0s!important;transition:none!important;transition-duration:0s!important}';
+    var ANIMATION_OVERRIDE = [
+      '*,*::before,*::after{',
+      'animation:none!important;',
+      'animation-delay:0s!important;',
+      'animation-duration:0s!important;',
+      'animation-play-state:paused!important;',
+      'transition:none!important;',
+      'transition-delay:0s!important;',
+      'transition-duration:0s!important;',
+      'scroll-behavior:auto!important;',
+      '}'
+    ].join('');
 
     function stripAnimations(doc) {
       try {
         var style = doc.createElement('style');
         style.textContent = ANIMATION_OVERRIDE;
         doc.head.appendChild(style);
+        Array.from(doc.querySelectorAll('details')).forEach(function(el) {
+          el.setAttribute('open', '');
+        });
       } catch(e) {}
+    }
+
+    function decodeImages(doc) {
+      var images = Array.from(doc.images || []);
+      images.forEach(function(img) {
+        if (img.decoding !== 'sync') img.decoding = 'sync';
+        if (img.loading !== 'eager') img.loading = 'eager';
+      });
+      return Promise.allSettled(images.map(function(img) {
+        return img.decode ? img.decode() : Promise.resolve();
+      }));
+    }
+
+    function makeWarning(code, message, severity) {
+      return { code: code, message: message, severity: severity || 'warning' };
     }
 
     // --- bounding rect helpers ---
@@ -145,11 +174,180 @@
         var rgb = getRgb(m[1]);
         if (!rgb) continue;
         var posStr = m[2];
-        var pos = posStr ? parseFloat(posStr) / (posStr.indexOf('%') !== -1 ? 100 : 1) : stops.length / Math.max(stops.length, 1);
-        stops.push({ color: { r: rgb.r, g: rgb.g, b: rgb.b, a: rgb.a }, position: Math.min(1, Math.max(0, pos)) });
+        var pos = posStr ? parseFloat(posStr) / (posStr.indexOf('%') !== -1 ? 100 : 1) : null;
+        stops.push({ color: { r: rgb.r, g: rgb.g, b: rgb.b, a: rgb.a }, position: pos });
       }
-      return stops.length >= 2 ? stops : null;
+      if (stops.length < 2) return null;
+      fixTransparentGradientStops(stops);
+      for (var i = 0; i < stops.length; i++) {
+        if (stops[i].position == null) {
+          stops[i].position = stops.length === 1 ? 0 : i / (stops.length - 1);
+        }
+        stops[i].position = Math.min(1, Math.max(0, stops[i].position));
+      }
+      return stops;
     }
+
+    function fixTransparentGradientStops(stops) {
+      for (var i = 0; i < stops.length; i++) {
+        var stop = stops[i];
+        if (!stop.color || stop.color.a !== 0) continue;
+
+        var source = null;
+        for (var p = i - 1; p >= 0; p--) {
+          if (stops[p].color && stops[p].color.a !== 0) {
+            source = stops[p].color;
+            break;
+          }
+        }
+        if (!source) {
+          for (var n = i + 1; n < stops.length; n++) {
+            if (stops[n].color && stops[n].color.a !== 0) {
+              source = stops[n].color;
+              break;
+            }
+          }
+        }
+        if (source) {
+          stop.color.r = source.r;
+          stop.color.g = source.g;
+          stop.color.b = source.b;
+        }
+      }
+    }
+
+    function getGradientPrelude(str) {
+      var open = str.indexOf('(');
+      if (open === -1) return '';
+      var depth = 0;
+      for (var i = open + 1; i < str.length; i++) {
+        var ch = str[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+          if (depth === 0) break;
+          depth--;
+        } else if (ch === ',' && depth === 0) {
+          return str.slice(open + 1, i).trim();
+        }
+      }
+      return '';
+    }
+
+    function parsePositionToken(token, axis, fallback) {
+      if (!token) return fallback;
+      token = token.toLowerCase();
+      if (token === 'center') return 0.5;
+      if (axis === 'x') {
+        if (token === 'left') return 0;
+        if (token === 'right') return 1;
+      } else {
+        if (token === 'top') return 0;
+        if (token === 'bottom') return 1;
+      }
+      if (token.indexOf('%') !== -1) return parseFloat(token) / 100;
+      if (token === '0' || token === '0px') return 0;
+      return fallback;
+    }
+
+    function parseRadialCenter(prelude) {
+      var center = { x: 0.5, y: 0.5 };
+      var atMatch = prelude.match(/\bat\b\s+(.+)$/i);
+      if (!atMatch) return center;
+
+      var tokens = atMatch[1].trim().split(/\s+/).filter(Boolean);
+      if (!tokens.length) return center;
+      if (tokens.length === 1) {
+        var only = tokens[0].toLowerCase();
+        if (only === 'top' || only === 'bottom') center.y = parsePositionToken(only, 'y', 0.5);
+        else center.x = parsePositionToken(only, 'x', 0.5);
+        return center;
+      }
+
+      var first = tokens[0].toLowerCase();
+      var second = tokens[1].toLowerCase();
+      if (first === 'top' || first === 'bottom') {
+        center.y = parsePositionToken(first, 'y', 0.5);
+        center.x = parsePositionToken(second, 'x', 0.5);
+      } else if (first === 'left' || first === 'right') {
+        center.x = parsePositionToken(first, 'x', 0.5);
+        center.y = parsePositionToken(second, 'y', 0.5);
+      } else {
+        center.x = parsePositionToken(first, 'x', 0.5);
+        center.y = parsePositionToken(second, 'y', 0.5);
+      }
+      center.x = Math.min(1, Math.max(0, center.x));
+      center.y = Math.min(1, Math.max(0, center.y));
+      return center;
+    }
+
+    function parseExplicitRadialSize(sizePart, center) {
+      var tokens = sizePart.replace(/\b(circle|ellipse)\b/gi, '').trim().split(/\s+/).filter(Boolean);
+      var values = tokens.filter(function(token) { return token.indexOf('%') !== -1 || token === '0' || token === '0px'; });
+      if (!values.length) return null;
+      var rx = parsePositionToken(values[0], 'x', null);
+      var ry = values.length > 1 ? parsePositionToken(values[1], 'y', null) : rx;
+      if (rx == null || ry == null) return null;
+      return { x: Math.max(0.0001, rx), y: Math.max(0.0001, ry) };
+    }
+
+    function radialRadiiFromSize(sizePart, center) {
+      var explicit = parseExplicitRadialSize(sizePart, center);
+      if (explicit) return explicit;
+
+      var lower = sizePart.toLowerCase();
+      var shapeCircle = lower.indexOf('circle') !== -1;
+      var sizeKeyword = 'farthest-corner';
+      if (lower.indexOf('closest-side') !== -1) sizeKeyword = 'closest-side';
+      else if (lower.indexOf('farthest-side') !== -1) sizeKeyword = 'farthest-side';
+      else if (lower.indexOf('closest-corner') !== -1) sizeKeyword = 'closest-corner';
+
+      var nearX = Math.min(center.x, 1 - center.x);
+      var farX = Math.max(center.x, 1 - center.x);
+      var nearY = Math.min(center.y, 1 - center.y);
+      var farY = Math.max(center.y, 1 - center.y);
+      var rx;
+      var ry;
+      if (shapeCircle) {
+        var radius;
+        if (sizeKeyword === 'closest-side') radius = Math.min(nearX, nearY);
+        else if (sizeKeyword === 'farthest-side') radius = Math.max(farX, farY);
+        else if (sizeKeyword === 'closest-corner') radius = Math.sqrt(nearX * nearX + nearY * nearY);
+        else radius = Math.sqrt(farX * farX + farY * farY);
+        rx = radius;
+        ry = radius;
+      } else if (sizeKeyword === 'closest-side') {
+        rx = nearX;
+        ry = nearY;
+      } else if (sizeKeyword === 'farthest-side') {
+        rx = farX;
+        ry = farY;
+      } else if (sizeKeyword === 'closest-corner') {
+        rx = Math.SQRT2 * nearX;
+        ry = Math.SQRT2 * nearY;
+      } else {
+        rx = Math.SQRT2 * farX;
+        ry = Math.SQRT2 * farY;
+      }
+      return { x: Math.max(0.0001, rx), y: Math.max(0.0001, ry) };
+    }
+
+    function radialGradientTransform(str) {
+      var prelude = getGradientPrelude(str);
+      if (prelude && prelude.search(/\bat\b/i) === -1 && /^(rgba?\(|hsla?\(|#[a-fA-F0-9]|transparent\b)/i.test(prelude.trim())) {
+        prelude = '';
+      }
+      var center = parseRadialCenter(prelude);
+      var atIndex = prelude.search(/\bat\b/i);
+      var sizePart = atIndex === -1 ? prelude : prelude.slice(0, atIndex);
+      var radii = radialRadiiFromSize(sizePart, center);
+      var sx = 0.5 / radii.x;
+      var sy = 0.5 / radii.y;
+      return [
+        [sx, 0, 0.5 - center.x * sx],
+        [0, sy, 0.5 - center.y * sy]
+      ];
+    }
+
     function parseGradient(str) {
       if (!str || str === 'none') return null;
       if (str.indexOf('linear-gradient') !== -1) {
@@ -159,17 +357,85 @@
         return { type: 'GRADIENT_LINEAR', gradientStops: s, gradientTransform: [[cos, sin, 0.5 - cos * 0.5 - sin * 0.5], [-sin, cos, 0.5 + sin * 0.5 - cos * 0.5]], visible: true };
       }
       if (str.indexOf('radial-gradient') !== -1) {
-        var s2 = parseColorStops(str); return s2 ? { type: 'GRADIENT_RADIAL', gradientStops: s2, visible: true } : null;
+        var s2 = parseColorStops(str); return s2 ? { type: 'GRADIENT_RADIAL', gradientStops: s2, gradientTransform: radialGradientTransform(str), visible: true } : null;
       }
       if (str.indexOf('conic-gradient') !== -1) {
-        var s3 = parseColorStops(str); return s3 ? { type: 'GRADIENT_ANGULAR', gradientStops: s3, visible: true } : null;
+        var s3 = parseColorStops(str); return s3 ? { type: 'GRADIENT_ANGULAR', gradientStops: s3, gradientTransform: [[1, 0, 0], [0, 1, 0]], visible: true } : null;
       }
       return null;
+    }
+
+    function splitCssLayers(value) {
+      var layers = [];
+      var depth = 0;
+      var quote = '';
+      var start = 0;
+      for (var i = 0; i < value.length; i++) {
+        var ch = value[i];
+        if (quote) {
+          if (ch === quote && value[i - 1] !== '\\') quote = '';
+          continue;
+        }
+        if (ch === '"' || ch === "'") {
+          quote = ch;
+          continue;
+        }
+        if (ch === '(') depth++;
+        else if (ch === ')') depth = Math.max(0, depth - 1);
+        else if (ch === ',' && depth === 0) {
+          layers.push(value.slice(start, i).trim());
+          start = i + 1;
+        }
+      }
+      var tail = value.slice(start).trim();
+      if (tail) layers.push(tail);
+      return layers;
+    }
+
+    function buildBackgroundFills(computedStyle, warnings, context) {
+      var fills = [];
+      var bg = getRgb(computedStyle.backgroundColor);
+      if (isVisibleColor(bg)) {
+        fills.push(solidPaintFromColor(bg));
+      }
+      if (computedStyle.backgroundImage && computedStyle.backgroundImage !== 'none') {
+        splitCssLayers(computedStyle.backgroundImage).forEach(function(layer) {
+          var gradient = parseGradient(layer);
+          if (gradient) {
+            fills.push(gradient);
+            return;
+          }
+          var urlMatch = layer.match(/url\(['"]?(.*?)['"]?\)/);
+          if (urlMatch && urlMatch[1]) {
+            fills.push({ url: urlMatch[1], type: 'IMAGE', scaleMode: computedStyle.backgroundSize === 'contain' ? 'FIT' : 'FILL', imageHash: null });
+            return;
+          }
+          if (warnings) {
+            warnings.push(makeWarning('UNSUPPORTED_BACKGROUND_LAYER', 'Could not map background layer on ' + context + ': ' + layer, 'info'));
+          }
+        });
+      }
+      return fills;
+    }
+
+    function isVisibleColor(rgb) {
+      return !!rgb && rgb.a !== 0;
+    }
+
+    function solidPaintFromColor(rgb) {
+      return { type: 'SOLID', color: { r: rgb.r, g: rgb.g, b: rgb.b }, opacity: rgb.a == null ? 1 : rgb.a };
+    }
+
+    function hasTextClippedBackground(computedStyle) {
+      var clip = computedStyle.backgroundClip || computedStyle.webkitBackgroundClip || '';
+      var textFill = computedStyle.webkitTextFillColor || '';
+      return clip.indexOf('text') !== -1 || textFill === 'transparent' || textFill === 'rgba(0, 0, 0, 0)';
     }
 
     // --- color parser ---
     function getRgb(colorString) {
       if (!colorString) return null;
+      if (colorString === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
       if (colorString[0] === '#') {
         var hex = colorString.slice(1);
         if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
@@ -184,14 +450,12 @@
       var m = colorString.match(/rgba?\(([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s*(?:\/\s*([\d\.]+))?\)/);
       if (m) {
         var a = m[4] !== undefined ? parseFloat(m[4]) : 1;
-        if (a === 0) return null;
         return { r: parseInt(m[1]) / 255, g: parseInt(m[2]) / 255, b: parseInt(m[3]) / 255, a: a };
       }
       // Legacy CSS: rgb(1, 86, 240) or rgba(1, 86, 240, 0.5)
       var old = colorString.match(/rgba?\(([\d\.]+),\s*([\d\.]+),\s*([\d\.]+)(?:,\s*([\d\.]+))?\)/);
       if (!old) return null;
       var r = old[1], g = old[2], b = old[3], a2 = old[4];
-      if (a2 && parseFloat(a2) === 0) return null;
       if (r && g && b) {
         return { r: parseInt(r) / 255, g: parseInt(g) / 255, b: parseInt(b) / 255, a: a2 ? parseFloat(a2) : 1 };
       }
@@ -263,6 +527,60 @@
       return typeof data === 'symbol' ? null : JSON.parse(JSON.stringify(data));
     }
 
+    function parsePseudoContent(el, pseudoStyle) {
+      var content = pseudoStyle.content;
+      if (!content || content === 'none' || content === 'normal') return '';
+      var attrMatch = content.match(/^attr\(([^)]+)\)$/);
+      if (attrMatch) return el.getAttribute(attrMatch[1].trim()) || '';
+      if ((content[0] === '"' && content[content.length - 1] === '"') ||
+          (content[0] === "'" && content[content.length - 1] === "'")) {
+        return content.slice(1, -1).replace(/\\"/g, '"').replace(/\\'/g, "'");
+      }
+      return content;
+    }
+
+    function appendPseudoTextLayer(layers, el, pseudo) {
+      var style = getComputedStyle(el, pseudo);
+      var text = parsePseudoContent(el, style);
+      if (!text.trim()) return;
+      var hostRect = getBoundingClientRect(el);
+      var fontSize = parseUnits(style.fontSize);
+      var lineHeight = parseUnits(style.lineHeight) || (fontSize ? { unit: 'PIXELS', value: Math.round(fontSize.value * 1.2) } : { unit: 'PIXELS', value: 12 });
+      var width = Math.max(hostRect.width, text.length * ((fontSize && fontSize.value) || 10) * 0.62);
+      var x = hostRect.left;
+      var y = pseudo === '::before' ? hostRect.top - lineHeight.value - 2 : hostRect.bottom + 2;
+      var left = parseUnits(style.left);
+      var top = parseUnits(style.top);
+      var bottom = parseUnits(style.bottom);
+      if (left) x = hostRect.left + left.value;
+      if (top) y = hostRect.top + top.value;
+      else if (bottom) y = hostRect.bottom - bottom.value - lineHeight.value;
+      if ((style.transform || '').indexOf('matrix') !== -1 && (style.left || '').indexOf('50%') !== -1) {
+        x = hostRect.left + hostRect.width / 2 - width / 2;
+      }
+      var rgb = getRgb(style.color);
+      var textLayer = {
+        type: 'TEXT',
+        ref: el,
+        name: pseudoLayerName(el, pseudo),
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(width),
+        height: Math.round(lineHeight.value),
+        characters: text,
+        lineHeight: lineHeight,
+        isPseudoElement: true,
+        _pseudo: pseudo,
+        _pseudoZIndex: isNaN(parseInt(style.zIndex, 10)) ? null : parseInt(style.zIndex, 10)
+      };
+      if (fontSize) textLayer.fontSize = Math.round(fontSize.value);
+      if (style.fontFamily) textLayer.fontFamily = style.fontFamily;
+      if (style.fontStyle) textLayer.fontStyle = style.fontStyle;
+      if (style.fontWeight) textLayer.fontWeight = parseFloat(style.fontWeight) || undefined;
+      if (isVisibleColor(rgb)) textLayer.fills = [solidPaintFromColor(rgb)];
+      layers.push(textLayer);
+    }
+
     // --- box-shadow parser ---
     var LENGTH_REG = /^[0-9]+[a-zA-Z%]+?$/;
     function isLength(v) { return v === '0' || LENGTH_REG.test(v); }
@@ -287,6 +605,198 @@
         blurRadius: nums[2] || 0, spreadRadius: nums[3] || 0, color: color };
     }
 
+    function parseBoxShadowEffects(str) {
+      if (!str || str === 'none') return [];
+      var effects = [];
+      splitCssLayers(str).forEach(function(layer) {
+        var parsedShadow = parseBoxShadowValue(layer);
+        var shadowColor = getRgb(parsedShadow.color);
+        if (!isVisibleColor(shadowColor)) return;
+        effects.push({
+          color: shadowColor,
+          type: parsedShadow.inset ? 'INNER_SHADOW' : 'DROP_SHADOW',
+          radius: parsedShadow.blurRadius,
+          spread: parsedShadow.spreadRadius,
+          blendMode: 'NORMAL',
+          visible: true,
+          offset: { x: parsedShadow.offsetX, y: parsedShadow.offsetY }
+        });
+      });
+      return effects;
+    }
+
+    function parseBackdropBlurEffect(computedStyle, warnings) {
+      var filter = computedStyle.backdropFilter || computedStyle.webkitBackdropFilter || '';
+      if (!filter || filter === 'none') return null;
+      var blur = filter.match(/blur\(([\d.]+)px\)/);
+      if (!blur) {
+        if (warnings) warnings.push(makeWarning('UNSUPPORTED_BACKDROP_FILTER', 'Only backdrop-filter blur() can be mapped to Figma.', 'info'));
+        return null;
+      }
+      if (filter.indexOf('saturate(') !== -1 && warnings) {
+        warnings.push(makeWarning('UNSUPPORTED_BACKDROP_SATURATE', 'backdrop-filter saturate() was ignored.', 'info'));
+      }
+      return { type: 'BACKGROUND_BLUR', radius: parseFloat(blur[1]), visible: true };
+    }
+
+    function parsePixelValue(value) {
+      if (!value || value === 'auto') return null;
+      var match = String(value).trim().match(/^(-?(?:\d+|\d*\.\d+))px$/);
+      return match ? parseFloat(match[1]) : null;
+    }
+
+    function clampColorChannel(value) {
+      return Math.min(1, Math.max(0, value));
+    }
+
+    function applySaturationToColor(color, amount) {
+      if (!color) return;
+      var r = color.r;
+      var g = color.g;
+      var b = color.b;
+      color.r = clampColorChannel((0.213 + 0.787 * amount) * r + (0.715 - 0.715 * amount) * g + (0.072 - 0.072 * amount) * b);
+      color.g = clampColorChannel((0.213 - 0.213 * amount) * r + (0.715 + 0.285 * amount) * g + (0.072 - 0.072 * amount) * b);
+      color.b = clampColorChannel((0.213 - 0.213 * amount) * r + (0.715 - 0.715 * amount) * g + (0.072 + 0.928 * amount) * b);
+    }
+
+    function applySaturationToFills(fills, amount) {
+      fills.forEach(function(fill) {
+        if (fill.type === 'SOLID') {
+          applySaturationToColor(fill.color, amount);
+        } else if (fill.gradientStops) {
+          fill.gradientStops.forEach(function(stop) {
+            applySaturationToColor(stop.color, amount);
+          });
+        }
+      });
+    }
+
+    function parsePseudoFilterEffects(computedStyle, fills, warnings, context) {
+      var filter = computedStyle.filter || '';
+      if (!filter || filter === 'none') return [];
+      var effects = [];
+      var unsupported = filter;
+      unsupported = unsupported.replace(/saturate\(\s*([\d.]+)(%)?\s*\)/gi, function(_, raw, percent) {
+        var amount = parseFloat(raw);
+        if (percent) amount = amount / 100;
+        if (!isNaN(amount)) applySaturationToFills(fills, amount);
+        return '';
+      });
+      unsupported = unsupported.replace(/blur\(\s*([\d.]+)px\s*\)/gi, function(_, raw) {
+        var radius = parseFloat(raw);
+        if (!isNaN(radius) && radius > 0) {
+          effects.push({ type: 'LAYER_BLUR', radius: radius, visible: true });
+        }
+        return '';
+      });
+      if (unsupported.trim() && warnings) {
+        warnings.push(makeWarning('UNSUPPORTED_PSEUDO_FILTER', 'Could not map filter on ' + context + ': ' + unsupported.trim(), 'info'));
+      }
+      return effects;
+    }
+
+    function pseudoLayerName(el, pseudo) {
+      var name = (el.tagName || 'element').toLowerCase();
+      if (el.id) name += '#' + el.id;
+      else if (el.classList && el.classList.length) name += '.' + Array.from(el.classList).join('.');
+      return name + pseudo;
+    }
+
+    function appendPseudoBoxLayer(layers, el, pseudo, warnings) {
+      var style = getComputedStyle(el, pseudo);
+      var content = style.content;
+      if (!content || content === 'none' || content === 'normal') return;
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+      var opacity = parseFloat(style.opacity);
+      if (!isNaN(opacity) && opacity <= 0) return;
+
+      var context = pseudoLayerName(el, pseudo);
+      var fills = buildBackgroundFills(style, warnings, context);
+      var effects = parseBoxShadowEffects(style.boxShadow);
+      effects = effects.concat(parsePseudoFilterEffects(style, fills, warnings, context));
+
+      var strokes = null;
+      var strokeWeight = null;
+      var border = (style.border || '').match(/^([\d.]+)px\s*(\w+)\s*(.*)$/);
+      if (border && border[1] !== '0' && border[2] !== 'none') {
+        var borderColor = getRgb(border[3]);
+        if (isVisibleColor(borderColor)) {
+          strokes = [solidPaintFromColor(borderColor)];
+          strokeWeight = Math.round(parseFloat(border[1]));
+        }
+      }
+
+      if (!fills.length && !effects.length && !strokes) return;
+      if (style.position !== 'absolute') {
+        if (warnings) warnings.push(makeWarning('UNSUPPORTED_PSEUDO_LAYOUT', 'Only absolutely positioned decorative pseudo-elements are mapped: ' + context, 'info'));
+        return;
+      }
+
+      var hostStyle = getComputedStyle(el);
+      if (hostStyle.position === 'static') {
+        if (warnings) warnings.push(makeWarning('UNSUPPORTED_PSEUDO_CONTAINING_BLOCK', 'Could not reliably resolve the containing block for ' + context, 'info'));
+        return;
+      }
+
+      var hostRect = getBoundingClientRect(el);
+      var width = parsePixelValue(style.width);
+      var height = parsePixelValue(style.height);
+      var left = parsePixelValue(style.left);
+      var right = parsePixelValue(style.right);
+      var top = parsePixelValue(style.top);
+      var bottom = parsePixelValue(style.bottom);
+      if (width == null || height == null || width < 1 || height < 1) {
+        if (warnings) warnings.push(makeWarning('UNSUPPORTED_PSEUDO_SIZE', 'Could not resolve pseudo-element dimensions for ' + context, 'info'));
+        return;
+      }
+
+      var x = left != null ? hostRect.left + left : right != null ? hostRect.right - right - width : null;
+      var y = top != null ? hostRect.top + top : bottom != null ? hostRect.bottom - bottom - height : null;
+      if (x == null || y == null) {
+        if (warnings) warnings.push(makeWarning('UNSUPPORTED_PSEUDO_POSITION', 'Could not resolve pseudo-element position for ' + context, 'info'));
+        return;
+      }
+
+      if (style.transform && style.transform !== 'none' && warnings) {
+        warnings.push(makeWarning('PSEUDO_TRANSFORM_APPROXIMATED', 'Pseudo-element transform was not applied on ' + context + '.', 'info'));
+      }
+
+      var boxLayer = {
+        type: 'RECTANGLE',
+        ref: el,
+        name: context,
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(width),
+        height: Math.round(height),
+        fills: fills,
+        isPseudoElement: true,
+        _pseudo: pseudo,
+        _pseudoZIndex: isNaN(parseInt(style.zIndex, 10)) ? null : parseInt(style.zIndex, 10)
+      };
+      if (strokes) {
+        boxLayer.strokes = strokes;
+        boxLayer.strokeWeight = strokeWeight;
+      }
+      if (effects.length) boxLayer.effects = effects;
+      if (!isNaN(opacity) && opacity < 1) boxLayer.opacity = opacity;
+
+      var btlr = parseRadius(style.borderTopLeftRadius, width, height);
+      if (btlr) boxLayer.topLeftRadius = btlr;
+      var btrr = parseRadius(style.borderTopRightRadius, width, height);
+      if (btrr) boxLayer.topRightRadius = btrr;
+      var bbrr = parseRadius(style.borderBottomRightRadius, width, height);
+      if (bbrr) boxLayer.bottomRightRadius = bbrr;
+      var bblr = parseRadius(style.borderBottomLeftRadius, width, height);
+      if (bblr) boxLayer.bottomLeftRadius = bblr;
+      if (!btlr && !btrr && !bbrr && !bblr) {
+        var radius = parseRadius(style.borderRadius, width, height);
+        if (radius) boxLayer.topLeftRadius = boxLayer.topRightRadius = boxLayer.bottomRightRadius = boxLayer.bottomLeftRadius = radius;
+      }
+
+      layers.push(boxLayer);
+    }
+
     // --- hasChildren ---
     function hasChildren(node) {
       return node && Array.isArray(node.children);
@@ -300,6 +810,28 @@
           layer.children.forEach(function(child) { traverse(child, cb, layer); });
         }
       }
+    }
+
+    function sortPseudoLayers(root) {
+      function stackRank(layer) {
+        if (layer._isElementBackground) return -1000000;
+        if (!layer.isPseudoElement) return 0;
+        if (typeof layer._pseudoZIndex === 'number' && layer._pseudoZIndex < 0) {
+          return -100000 + layer._pseudoZIndex;
+        }
+        if (typeof layer._pseudoZIndex === 'number' && layer._pseudoZIndex > 0) {
+          return 100000 + layer._pseudoZIndex;
+        }
+        return layer._pseudo === '::before' ? -1 : 1;
+      }
+
+      traverse(root, function(layer) {
+        if (!layer.children || !layer.children.some(function(child) { return child.isPseudoElement; })) return;
+        layer.children = layer.children
+          .map(function(child, index) { return { child: child, index: index, rank: stackRank(child) }; })
+          .sort(function(a, b) { return a.rank - b.rank || a.index - b.index; })
+          .map(function(entry) { return entry.child; });
+      });
     }
 
     // --- makeTree: build frame hierarchy ---
@@ -325,7 +857,7 @@
         if (iterations++ > 10000) { console.error('Too many tree iterations 1'); break; }
         traverse(root, function(layer, originalParent) {
           var node = layer.ref;
-          var parentElement = node && node.parentElement;
+          var parentElement = layer.isPseudoElement ? node : node && node.parentElement;
           do {
             if (parentElement === doc.body) break;
             if (parentElement && parentElement !== doc.body) {
@@ -507,6 +1039,115 @@
       });
     }
 
+    function pxValue(value) {
+      if (!value || value === 'normal' || value === 'auto') return 0;
+      var parsed = parseFloat(value);
+      return isNaN(parsed) ? 0 : parsed;
+    }
+
+    function mapPrimaryAlign(value) {
+      if (value === 'center') return 'CENTER';
+      if (value === 'flex-end' || value === 'end' || value === 'right') return 'MAX';
+      if (value === 'space-between') return 'SPACE_BETWEEN';
+      return 'MIN';
+    }
+
+    function mapCounterAlign(value) {
+      if (value === 'center') return 'CENTER';
+      if (value === 'flex-end' || value === 'end' || value === 'bottom') return 'MAX';
+      if (value === 'baseline') return 'BASELINE';
+      return 'MIN';
+    }
+
+    function getLayerEnd(layer, axis) {
+      return axis === 'HORIZONTAL' ? layer.x + layer.width : layer.y + layer.height;
+    }
+
+    function getLayerStart(layer, axis) {
+      return axis === 'HORIZONTAL' ? layer.x : layer.y;
+    }
+
+    function hasUnstableTransform(el) {
+      if (!el || el.nodeType !== 1) return false;
+      var transform = getComputedStyle(el).transform;
+      return !!transform && transform !== 'none';
+    }
+
+    function getStableAxisMetrics(children, axis) {
+      if (!children || children.length < 2) return null;
+      var ordered = children.slice().sort(function(a, b) {
+        return getLayerStart(a, axis) - getLayerStart(b, axis);
+      });
+      var gaps = [];
+      for (var i = 1; i < ordered.length; i++) {
+        var gap = getLayerStart(ordered[i], axis) - getLayerEnd(ordered[i - 1], axis);
+        if (gap < -1) return null;
+        gaps.push(Math.max(0, gap));
+      }
+      var avg = gaps.reduce(function(sum, gap) { return sum + gap; }, 0) / gaps.length;
+      var maxVariance = gaps.reduce(function(max, gap) {
+        return Math.max(max, Math.abs(gap - avg));
+      }, 0);
+      if (maxVariance > 6) return null;
+      return { ordered: ordered, itemSpacing: Math.round(avg) };
+    }
+
+    function inferAutoLayout(layers, warnings) {
+      layers.forEach(function(layer) {
+        traverse(layer, function(frame) {
+          if (frame.type !== 'FRAME' || !frame.children || frame.children.length < 2 || !frame.ref) return;
+          var el = frame.ref.nodeType === 3 ? frame.ref.parentElement : frame.ref;
+          if (!el || el.nodeType !== 1) return;
+          var style = getComputedStyle(el);
+          var display = style.display || '';
+          var isFlex = display.indexOf('flex') !== -1;
+          var isGrid = display.indexOf('grid') !== -1;
+          if (!isFlex && !isGrid) return;
+          if (hasUnstableTransform(el)) {
+            warnings.push(makeWarning('AUTO_LAYOUT_SKIPPED_TRANSFORM', 'Skipped Auto Layout on a transformed container.', 'info'));
+            return;
+          }
+          if (isFlex && style.flexWrap && style.flexWrap !== 'nowrap') {
+            warnings.push(makeWarning('AUTO_LAYOUT_SKIPPED_WRAP', 'Skipped wrapped flex container to preserve visual placement.', 'info'));
+            return;
+          }
+          if (frame.children.some(function(child) { return hasUnstableTransform(child.ref); })) {
+            warnings.push(makeWarning('AUTO_LAYOUT_SKIPPED_CHILD_TRANSFORM', 'Skipped Auto Layout because a child has transform.', 'info'));
+            return;
+          }
+
+          var axis = 'HORIZONTAL';
+          if (isFlex && style.flexDirection && style.flexDirection.indexOf('column') === 0) {
+            axis = 'VERTICAL';
+          } else if (isGrid) {
+            var h = getStableAxisMetrics(frame.children, 'HORIZONTAL');
+            var v = getStableAxisMetrics(frame.children, 'VERTICAL');
+            axis = v && (!h || v.itemSpacing <= h.itemSpacing) ? 'VERTICAL' : 'HORIZONTAL';
+          }
+
+          var metrics = getStableAxisMetrics(frame.children, axis);
+          if (!metrics) {
+            warnings.push(makeWarning('AUTO_LAYOUT_SKIPPED_OVERLAP', 'Skipped Auto Layout because children do not form a stable single-axis flow.', 'info'));
+            return;
+          }
+
+          frame.children = metrics.ordered;
+          frame.layoutMode = axis;
+          frame.layoutConfidence = 'high';
+          frame.layoutReason = isFlex ? 'css-flex-single-axis' : 'css-grid-single-axis';
+          frame.itemSpacing = pxValue(axis === 'HORIZONTAL' ? style.columnGap || style.gap : style.rowGap || style.gap) || metrics.itemSpacing;
+          frame.paddingTop = pxValue(style.paddingTop);
+          frame.paddingRight = pxValue(style.paddingRight);
+          frame.paddingBottom = pxValue(style.paddingBottom);
+          frame.paddingLeft = pxValue(style.paddingLeft);
+          frame.primaryAxisAlignItems = mapPrimaryAlign(style.justifyContent);
+          frame.counterAxisAlignItems = mapCounterAlign(style.alignItems);
+          frame.primaryAxisSizingMode = 'FIXED';
+          frame.counterAxisSizingMode = 'FIXED';
+        });
+      });
+    }
+
     // --- mergeAdjacentText: merge adjacent TEXT layers under same block ancestor ---
     // Inline tags (<strong>, <em>) fragment text nodes across multiple TEXT layers.
     // Merging them into one TEXT layer lets Figma do character-level wrapping,
@@ -525,6 +1166,7 @@
       var blockGroups = new Map();
       for (var i = 0; i < layers.length; i++) {
         if (layers[i].type !== 'TEXT') continue;
+        if (layers[i].isPseudoElement) continue;
         var textNode = layers[i].ref;
         var parentEl = textNode ? textNode.parentElement : null;
         var ancestor = parentEl ? getBlockAncestor(parentEl) : body;
@@ -616,7 +1258,12 @@
     // --- removeRefs ---
     function removeRefs(layers) {
       layers.forEach(function(layer) {
-        traverse(layer, function(child) { delete child.ref; });
+        traverse(layer, function(child) {
+          delete child.ref;
+          delete child._pseudo;
+          delete child._pseudoZIndex;
+          delete child._isElementBackground;
+        });
       });
     }
 
@@ -627,6 +1274,7 @@
       doc = doc || document;
       win = win || window;
       var useFrames = options && options.useFrames;
+      var warnings = (options && options.warnings) || [];
       var layers = [];
       var el = rootElement || doc.body;
 
@@ -679,9 +1327,18 @@
 
         var appliedStyles = getAppliedComputedStyles(el);
         var computedStyle = getComputedStyle(el);
+        var isTextGradientElement = hasTextClippedBackground(computedStyle);
+        var pseudoLayers = [];
+        appendPseudoBoxLayer(pseudoLayers, el, '::before', warnings);
+        appendPseudoTextLayer(pseudoLayers, el, '::before');
+        appendPseudoBoxLayer(pseudoLayers, el, '::after', warnings);
+        appendPseudoTextLayer(pseudoLayers, el, '::after');
 
         if (!(size(appliedStyles) || el.tagName === 'IMG' ||
-            el.tagName === 'PICTURE' || el.tagName === 'VIDEO')) return;
+            el.tagName === 'PICTURE' || el.tagName === 'VIDEO')) {
+          pseudoLayers.forEach(function(layer) { layers.push(layer); });
+          return;
+        }
         if (computedStyle.display === 'none') return;
 
         var rect = getBoundingClientRect(el);
@@ -697,17 +1354,14 @@
 
         if (rect.width < 1 || rect.height < 1) return;
 
-        var fills = [];
-        var color = getRgb(computedStyle.backgroundColor);
-        if (color) {
-          fills.push({ type: 'SOLID', color: { r: color.r, g: color.g, b: color.b }, opacity: color.a || 1 });
-        }
+        var fills = isTextGradientElement ? [] : buildBackgroundFills(computedStyle, warnings, el.tagName.toLowerCase());
 
         var rectNode = {
           type: 'RECTANGLE', ref: el,
           x: Math.round(rect.left), y: Math.round(rect.top),
           width: Math.round(rect.width), height: Math.round(rect.height),
-          fills: fills
+          fills: fills,
+          _isElementBackground: true
         };
 
         // Uniform border
@@ -717,8 +1371,8 @@
             var bWidth = parsed[1], bType = parsed[2], bColor = parsed[3];
             if (bWidth && bWidth !== '0' && bType !== 'none' && bColor) {
               var rgb = getRgb(bColor);
-              if (rgb) {
-                rectNode.strokes = [{ type: 'SOLID', color: { r: rgb.r, g: rgb.g, b: rgb.b }, opacity: rgb.a || 1 }];
+              if (isVisibleColor(rgb)) {
+                rectNode.strokes = [solidPaintFromColor(rgb)];
                 rectNode.strokeWeight = Math.round(parseFloat(bWidth));
               }
             }
@@ -738,7 +1392,7 @@
                 var dbw = dp[1], dbt = dp[2], dbc = dp[3];
                 if (dbw && dbw !== '0' && dbt !== 'none' && dbc) {
                   var drgb = getRgb(dbc);
-                  if (drgb) {
+                  if (isVisibleColor(drgb)) {
                     var bw = parseFloat(dbw);
                     var sideWidth = (dir === 'top' || dir === 'bottom') ? rect.width : bw;
                     var sideHeight = (dir === 'left' || dir === 'right') ? rect.height : bw;
@@ -747,24 +1401,11 @@
                     layers.push({
                       ref: el, type: 'RECTANGLE',
                       x: sideX, y: sideY, width: sideWidth, height: sideHeight,
-                      fills: [{ type: 'SOLID', color: { r: drgb.r, g: drgb.g, b: drgb.b }, opacity: drgb.a || 1 }]
+                      fills: [solidPaintFromColor(drgb)]
                     });
                   }
                 }
               }
-            }
-          }
-        }
-
-        // Background image (gradient or URL)
-        if (computedStyle.backgroundImage && computedStyle.backgroundImage !== 'none') {
-          var gradient = parseGradient(computedStyle.backgroundImage);
-          if (gradient) {
-            fills.push(gradient);
-          } else {
-            var urlMatch = computedStyle.backgroundImage.match(/url\(['"]?(.*?)['"]?\)/);
-            if (urlMatch && urlMatch[1]) {
-              fills.push({ url: urlMatch[1], type: 'IMAGE', scaleMode: computedStyle.backgroundSize === 'contain' ? 'FIT' : 'FILL', imageHash: null });
             }
           }
         }
@@ -790,19 +1431,10 @@
           fills.push({ url: el.poster, type: 'IMAGE', scaleMode: computedStyle.objectFit === 'contain' ? 'FIT' : 'FILL', imageHash: null });
         }
 
-        // Box shadow
-        if (computedStyle.boxShadow && computedStyle.boxShadow !== 'none') {
-          var parsedShadow = parseBoxShadowValue(computedStyle.boxShadow);
-          var shadowColor = getRgb(parsedShadow.color);
-          if (shadowColor) {
-            rectNode.effects = [{
-              color: shadowColor, type: 'DROP_SHADOW',
-              radius: parsedShadow.blurRadius, spread: parsedShadow.spreadRadius,
-              blendMode: 'NORMAL', visible: true,
-              offset: { x: parsedShadow.offsetX, y: parsedShadow.offsetY }
-            }];
-          }
-        }
+        var effects = parseBoxShadowEffects(computedStyle.boxShadow);
+        var blurEffect = parseBackdropBlurEffect(computedStyle, warnings);
+        if (blurEffect) effects.push(blurEffect);
+        if (effects.length) rectNode.effects = effects;
 
         // Border radius (4 corners)
         var btlr = parseRadius(computedStyle.borderTopLeftRadius, rect.width, rect.height);
@@ -820,6 +1452,7 @@
 
         rectNode.fills = fills;
         layers.push(rectNode);
+        pseudoLayers.forEach(function(layer) { layers.push(layer); });
       });
 
       // --- Text nodes ---
@@ -859,9 +1492,21 @@
         };
 
         var tFills = [];
-        var tRgb = getRgb(pComputed.color);
-        if (tRgb) {
-          tFills.push({ type: 'SOLID', color: { r: tRgb.r, g: tRgb.g, b: tRgb.b }, opacity: tRgb.a || 1 });
+        if (hasTextClippedBackground(pComputed) && pComputed.backgroundImage && pComputed.backgroundImage !== 'none') {
+          splitCssLayers(pComputed.backgroundImage).some(function(layer) {
+            var gradient = parseGradient(layer);
+            if (gradient) {
+              tFills.push(gradient);
+              return true;
+            }
+            return false;
+          });
+        }
+        if (!tFills.length) {
+          var tRgb = getRgb(pComputed.color);
+          if (isVisibleColor(tRgb)) {
+            tFills.push(solidPaintFromColor(tRgb));
+          }
         }
         if (tFills.length) textNode.fills = tFills;
 
@@ -878,6 +1523,8 @@
         if (fs) textNode.fontSize = Math.round(fs.value);
 
         if (pComputed.fontFamily) textNode.fontFamily = pComputed.fontFamily;
+        if (pComputed.fontStyle) textNode.fontStyle = pComputed.fontStyle;
+        if (pComputed.fontWeight) textNode.fontWeight = parseFloat(pComputed.fontWeight) || undefined;
 
         if (pComputed.textDecoration === 'underline' || pComputed.textDecoration === 'strikethrough') {
           textNode.textDecoration = pComputed.textDecoration.toUpperCase();
@@ -901,14 +1548,21 @@
         height: Math.round(doc.documentElement.scrollHeight),
         x: 0, y: 0, ref: doc.body
       };
+      var rootComputed = getComputedStyle(doc.body || doc.documentElement);
+      var rootFills = buildBackgroundFills(rootComputed, warnings, 'body');
+      if (rootFills.length) root.fills = rootFills;
 
       // Build tree or return flat
       if (useFrames) {
         var refMap = new WeakMap();
-        layers.forEach(function(layer) { if (layer.ref) refMap.set(layer.ref, layer); });
+        layers.forEach(function(layer) {
+          if (layer.ref && !layer.isPseudoElement) refMap.set(layer.ref, layer);
+        });
         root.children = layers.slice();
         makeTree(root, layers, refMap, doc);
+        sortPseudoLayers(root);
         addConstraints([root]);
+        inferAutoLayout([root], warnings);
         removeRefs([root]);
         return [root];
       }
@@ -937,21 +1591,46 @@
             try {
               var idoc = iframe.contentDocument || iframe.contentWindow.document;
               var iwin = iframe.contentWindow || iframe.contentWindow;
+              var warnings = [];
               stripAnimations(idoc);
 
-              requestAnimationFrame(function() {
+              decodeImages(idoc).catch(function(err) {
+                warnings.push(makeWarning('IMAGE_DECODE_FAILED', String(err), 'info'));
+              }).then(function() {
+                requestAnimationFrame(function() {
                 try {
                   var body = idoc.body || idoc.documentElement;
                   // Call htmlToFigma directly, with iframe's document/window
-                  var result = htmlToFigma(body, { useFrames: window._useFrames !== false }, idoc, iwin);
+                  var result = htmlToFigma(body, { useFrames: window._useFrames !== false, warnings: warnings }, idoc, iwin);
+                  var payload = {
+                    version: 1,
+                    source: 'local-html',
+                    title: idoc.title || undefined,
+                    layers: result,
+                    viewportRect: {
+                      x: 0,
+                      y: 0,
+                      width: Math.round(iwin.innerWidth),
+                      height: Math.round(iwin.innerHeight)
+                    },
+                    documentRect: {
+                      x: 0,
+                      y: 0,
+                      width: Math.round(idoc.documentElement.scrollWidth),
+                      height: Math.round(idoc.documentElement.scrollHeight)
+                    },
+                    devicePixelRatio: iwin.devicePixelRatio || 1,
+                    warnings: warnings
+                  };
                   document.body.removeChild(iframe);
                   console.log('[Extractor] Layers extracted:', result.length);
-                  resolve({ layers: result });
+                  resolve(payload);
                 } catch(e) {
                   document.body.removeChild(iframe);
                   console.error('[Extractor] Error:', e);
                   reject(e);
                 }
+                });
               });
             } catch(e) {
               document.body.removeChild(iframe);
